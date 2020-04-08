@@ -108,14 +108,18 @@
   }
 
 
-  static char *
-  Name_Field( const char * name )
+  static char*
+  Name_Field( const char*  name )
   {
-    static char result[80];
-    int left = ( 20 - (int) strlen(name) );
+    static char  result[80];
+    int          left = ( 20 - (int)strlen( name ) );
+
+
     if ( left <= 0 )
       left = 1;
+
     sprintf( result, "   %s:%*s", name, left, " " );
+
     return result;
   }
 
@@ -156,12 +160,13 @@
       created  += head->Created [0] == 1 ? 2212122496 : -2082844800;
       modified += head->Modified[0] == 1 ? 2212122496 : -2082844800;
 
-      strftime( buf, sizeof( buf ), "%Y-%m-%d", gmtime( &created  ) );
-      printf("%s%s\n", Name_Field( "created" ), buf );
-      strftime( buf, sizeof( buf ), "%Y-%m-%d", gmtime( &modified ) );
-      printf("%s%s\n", Name_Field( "modified" ), buf );
+      strftime( buf, sizeof ( buf ), "%Y-%m-%d", gmtime( &created  ) );
+      printf( "%s%s\n", Name_Field( "created" ), buf );
+      strftime( buf, sizeof ( buf ), "%Y-%m-%d", gmtime( &modified ) );
+      printf( "%s%s\n", Name_Field( "modified" ), buf );
 
-      printf("%s%.2f\n", Name_Field( "revision" ), head->Font_Revision / 65536.0 );
+      printf( "%s%.2f\n", Name_Field( "revision" ),
+              head->Font_Revision / 65536.0 );
     }
 
   }
@@ -174,7 +179,8 @@
     printf( "font type entries\n" );
 
     module = &face->driver->root;
-    printf( "%s%s\n", Name_Field( "FreeType driver" ), module->clazz->module_name );
+    printf( "%s%s\n", Name_Field( "FreeType driver" ),
+            module->clazz->module_name );
 
     /* Is it better to dump all sfnt tag names? */
     printf( "%s%s\n", Name_Field( "sfnt wrapped" ),
