@@ -4,7 +4,7 @@
  *
  *    Graphics device interface
  *
- *  Copyright (C) 1999-2019 by
+ *  Copyright (C) 1999-2020 by
  *  The FreeType Development Team - www.freetype.org
  *
  *
@@ -107,8 +107,8 @@
 
   struct grDevice_
   {
-    unsigned int  surface_objsize;
-    const char*   device_name;  /* name of device                 */
+    size_t       surface_objsize;
+    const char*  device_name;  /* name of device                 */
 
     grDeviceInitFunc        init;
     grDeviceDoneFunc        done;

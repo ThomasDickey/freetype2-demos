@@ -5,7 +5,7 @@
  *  This driver maintains the image in memory without displaying it,
  *  used by the graphics utility of the FreeType test suite.
  *
- *  Copyright (C) 1999-2019 by
+ *  Copyright (C) 1999-2020 by
  *  David Turner, Robert Wilhelm, and Werner Lemberg.
  *
  *  This file is part of the FreeType project, and may only be used
@@ -72,6 +72,10 @@
   gr_batch_surface_init( grSurface*  surface,
                          grBitmap*   bitmap )
   {
+    /* Set default mode */
+    if ( bitmap->mode == gr_pixel_mode_none )
+      bitmap->mode = gr_pixel_mode_rgb24;
+
     if ( grNewBitmap( bitmap->mode, bitmap->grays,
                       bitmap->width, bitmap->rows, bitmap ) )
       return 0;

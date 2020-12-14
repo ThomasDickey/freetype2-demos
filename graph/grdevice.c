@@ -1,6 +1,5 @@
 #include "grobjs.h"
 #include "grdevice.h"
-#include <stdlib.h>
 #include <string.h>
 
   grDeviceChain*  gr_device_chain;
@@ -140,15 +139,17 @@
 
     /* Now find the device */
     device = find_device( device_name );
-    if (!device) return 0;
+    if (!device) return NULL;
 
     surface = (grSurface*)grAlloc( device->surface_objsize );
-    if (!surface) return 0;
+    if (!surface) return NULL;
+
+    bitmap->buffer = NULL;
 
     if ( !device->init_surface( surface, bitmap ) )
     {
       grFree( (void *)surface );
-      surface = 0;
+      surface = NULL;
     }
     else
       grSetTargetGamma( (grBitmap*)surface, 1.8 );
@@ -171,7 +172,7 @@
         grFree( surface->bitmap.buffer );
 
       surface->owner         = 0;
-      surface->bitmap.buffer = 0;
+      surface->bitmap.buffer = NULL;
       grFree( surface );
     }
   }
@@ -308,7 +309,6 @@
   }
 
 
-
  /**********************************************************************
   *
   * <Function>
@@ -331,6 +331,35 @@
   }
 
 
+ /**********************************************************************
+ *
+ * <Function>
+ *    grSetIcon
+ *
+ * <Description>
+ *    set the icon of a given windowed surface.
+ *
+ * <Input>
+ *    surface :: handle to target surface
+ *    icon    :: handle to icon bitmap
+ *
+ * <Return>
+ *    the next appropriate icon size in pixels.
+ *
+ * <Note>
+ *    Returns the largest appropriate icon size if icon is NULL.
+ *
+ *
+ **********************************************************************/
+
+  extern int  grSetIcon( grSurface*  surface,
+                         grBitmap*   icon )
+  {
+    if (surface->set_icon)
+      return surface->set_icon( surface, icon );
+
+    return 0;
+  }
 
 
  /**********************************************************************

@@ -2,7 +2,7 @@
 /*                                                                          */
 /*  The FreeType project -- a free and portable quality TrueType renderer.  */
 /*                                                                          */
-/*  Copyright (C) 2004-2019 by                                              */
+/*  Copyright (C) 2004-2020 by                                              */
 /*  D. Turner, R.Wilhelm, and W. Lemberg                                    */
 /*                                                                          */
 /*                                                                          */
@@ -227,7 +227,7 @@
 
     memset( display->bitmap->buffer,
             100,
-            (unsigned int)( pitch * display->bitmap->rows ) );
+            (size_t)pitch * (size_t)display->bitmap->rows );
 
     grWriteCellString( display->bitmap, 0, 0, "Gamma grid",
                        display->fore_color );
@@ -238,36 +238,22 @@
       double  ggamma = 0.1 * g;
       char    temp[6];
       int     y = y_0 + ( yside + 1 ) * ( g - 1 );
-      int     nx, ny;
-
-      unsigned char*  line = display->bitmap->buffer +
-                             y * display->bitmap->pitch;
+      int     nx;
 
 
-      if ( display->bitmap->pitch < 0 )
-        line -= display->bitmap->pitch * ( display->bitmap->rows - 1 );
+      snprintf( temp, sizeof ( temp ), "%.1f", ggamma );
+      grWriteCellString( display->bitmap, x_0 - 32, y + ( yside - 6 ) / 2,
+                         temp, display->fore_color );
 
-      line += x_0 * 3;
-
-      grSetPixelMargin( x_0 - 32, y + ( yside - 8 ) / 2 );
-      grGotoxy( 0, 0 );
-
-      sprintf( temp, "%.1f", ggamma );
-      grWrite( temp );
-
-      for ( ny = 0; ny < yside; ny++, line += display->bitmap->pitch )
+      for ( nx = 0; nx < levels; nx++ )
       {
-        unsigned char*  dst = line;
+        double   p  = nx / (double)( levels - 1 );
+        int      gm = (int)( 255.0 * pow( p, ggamma ) + 0.5 );
+        grColor  c;
 
 
-        for ( nx = 0; nx < levels; nx++, dst += 3 * xside )
-        {
-          double  p   = nx / (double)( levels - 1 );
-          int     gm  = (int)( 255.0 * pow( p, ggamma ) + 0.5 );
-
-
-          memset( dst, gm, (unsigned int)( xside * 3 ) );
-        }
+        c = grFindColor( display->bitmap, gm, gm, gm, 0xff );
+        grFillRect( display->bitmap, x_0 + nx * xside, y, xside, yside, c );
       }
     }
 
@@ -285,36 +271,50 @@
                  int        lcd )
   {
     int  pitch = abs( out->pitch );
+    int  l = 0, r = in->width, t = 0, b = in->rows;
     int  i, ii, j;
 
     unsigned char*  src;
     unsigned char*  dst;
 
 
+    /* clip if necessary */
+    if ( x < 0 )
+      l = -x;
+    if ( y < 0 )
+      t = -y;
+    if ( x + r > out->width )
+      r = out->width - x;
+    if ( y + b > out->rows )
+      b = out->rows - y;
+
     if ( color.chroma[0] == 255 )
-      for ( src = in->buffer, i = 0; i < in->rows; i++ )
+      for ( i = t; i < b; i++ )
       {
-        ii = ( i + 24 * lcd ) % in->rows;
-        dst = out->buffer + ( y + ii ) * pitch + 3 * x;
-        for ( j = 0; j < in->width; j++, src++, dst += 3 )
+        ii = ( i +  0 * lcd ) % in->rows;
+        src = in->buffer + ii * in->pitch + l;
+        dst = out->buffer + ( y + i ) * pitch + 3 * ( x + l );
+        for ( j = l; j < r; j++, src++, dst += 3 )
           *dst = *src;
       }
 
     if ( color.chroma[1] == 255 )
-      for ( src = in->buffer, i = 0; i < in->rows; i++ )
+      for ( i = t; i < b; i++ )
       {
         ii = ( i + 12 * lcd ) % in->rows;
-        dst = out->buffer + ( y + ii ) * pitch + 3 * x + 1;
-        for ( j = 0; j < in->width; j++, src++, dst += 3 )
+        src = in->buffer + ii * in->pitch + l;
+        dst = out->buffer + ( y + i ) * pitch + 3 * ( x + l ) + 1;
+        for ( j = l; j < r; j++, src++, dst += 3 )
           *dst = *src;
       }
 
     if ( color.chroma[2] == 255 )
-      for ( src = in->buffer, i = 0; i < in->rows; i++ )
+      for ( i = t; i < b; i++ )
       {
-        ii = ( i +  0 * lcd ) % in->rows;
-        dst = out->buffer + ( y + ii ) * pitch + 3 * x + 2;
-        for ( j = 0; j < in->width; j++, src++, dst += 3 )
+        ii = ( i + 24 * lcd ) % in->rows;
+        src = in->buffer + ii * in->pitch + l;
+        dst = out->buffer + ( y + i ) * pitch + 3 * ( x + l ) + 2;
+        for ( j = l; j < r; j++, src++, dst += 3 )
           *dst = *src;
       }
   }
@@ -328,6 +328,9 @@
 
 
     grListenSurface( display->surface, 0, &event );
+
+    if ( event.type == gr_event_resize )
+      return ret;
 
     switch ( event.key )
     {
@@ -369,7 +372,7 @@
     char  buf[4];
     int   i;
 
-    display = FTDemo_Display_New( NULL, DIM );
+    display = FTDemo_Display_New( NULL, DIM "x24" );
     if ( !display )
     {
       PanicZ( "could not allocate display surface" );
@@ -387,36 +390,42 @@
 
     do
     {
+      int  x = display->bitmap->width / 2;
+      int  y = display->bitmap->rows / 2;
+
+
       FTDemo_Display_Clear( display );
 
       switch ( status )
       {
       case 0:
-        grWriteCellString( display->bitmap, 236, 75, "Solid-Checkered Pattern",
-                           display->fore_color );
-        Render_Bitmap( display->bitmap, &bit1, 20, 90, display->fore_color, 0 );
+        grWriteCellString( display->bitmap, x - 84, y - 165,
+                           "Solid-Checkered Pattern", display->fore_color );
+        Render_Bitmap( display->bitmap, &bit1, x - 300, y - 150,
+                       display->fore_color, 0 );
         break;
       case 1:
-        grWriteCellString( display->bitmap, 236, 75, "Grayscale Anti-Aliasing",
-                           display->fore_color );
-        Render_Bitmap( display->bitmap, &bit2, 20, 96, display->fore_color, 0 );
+        grWriteCellString( display->bitmap, x - 84, y - 165,
+                           "Grayscale Anti-Aliasing", display->fore_color );
+        Render_Bitmap( display->bitmap, &bit2, x - 300, y - 144,
+                       display->fore_color, 0 );
         break;
       case 2:
-        grWriteCellString( display->bitmap, 236, 75, "Subpixel  Anti-Aliasing",
-                           display->fore_color );
-        Render_Bitmap( display->bitmap, &bit2, 20, 96, display->fore_color, 1 );
+        grWriteCellString( display->bitmap, x - 84, y - 165,
+                           "Subpixel  Anti-Aliasing", display->fore_color );
+        Render_Bitmap( display->bitmap, &bit2, x - 300, y - 144,
+                       display->fore_color, 1 );
         break;
       }
 
       for ( i = 0; i <= 10; i++ )
       {
-        sprintf( buf, "%.1f", 1. + .2 * i );
-        grWriteCellString( display->bitmap, 9 + i * 60, 395, buf,
-                           display->fore_color );
+        snprintf( buf, sizeof ( buf ), "%.1f", 1. + .2 * i );
+        grWriteCellString( display->bitmap, x - 311 + i * 60, y + 155,
+                           buf, display->fore_color );
       }
 
-      grWriteCellString( display->bitmap,
-                         display->bitmap->width / 2 - 20, 410,
+      grWriteCellString( display->bitmap, x - 20, y + 170,
                          "Gamma", display->fore_color );
 
       grRefreshSurface( display->surface );

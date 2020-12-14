@@ -4,7 +4,7 @@
  *
  *    basic object classes definitions
  *
- *  Copyright (C) 1999 by
+ *  Copyright (C) 1999-2020 by
  *  The FreeType Development Team - www.freetype.org
  *
  *
@@ -14,6 +14,8 @@
 
 #ifndef GROBJS_H_
 #define GROBJS_H_
+
+#include <stdlib.h>
 
 #include "graph.h"
 #include "grconfig.h"
@@ -94,6 +96,9 @@
   typedef void (*grSetTitleFunc)( grSurface*   surface,
                                   const char*  title_string );
 
+  typedef int  (*grSetIconFunc)( grSurface*  surface,
+                                 grBitmap*   icon );
+
   typedef void (*grRefreshRectFunc)( grSurface*  surface,
                                      int         x,
                                      int         y,
@@ -142,6 +147,7 @@
 
     grRefreshRectFunc  refresh_rect;
     grSetTitleFunc     set_title;
+    grSetIconFunc      set_icon;
     grListenEventFunc  listen_event;
     grDoneSurfaceFunc  done;
   };
@@ -165,7 +171,7 @@
   ********************************************************************/
 
   extern unsigned char*
-  grAlloc( unsigned long  size );
+  grAlloc( size_t  size );
 
 
  /********************************************************************

@@ -71,7 +71,7 @@ gr_fill_hline_8( unsigned char*   line,
                  int              width,
                  grColor          color )
 {
-  memset( line+x, color.value, (unsigned int)width );
+  memset( line+x, color.value, (size_t)width );
 }
 
 static void
@@ -99,7 +99,7 @@ gr_fill_hline_24( unsigned char*  line,
   line += 3*x;
 
   if (r == g && g == b)
-    memset( line, r, (unsigned int)(width*3) );
+    memset( line, r, (size_t)(width*3) );
   else
   {
     for ( ; width > 0; width--, line += 3 )
@@ -112,21 +112,15 @@ gr_fill_hline_24( unsigned char*  line,
 }
 
 static void
-gr_fill_hline_32( unsigned char*  line,
+gr_fill_hline_32( unsigned char*  _line,
                   int             x,
                   int             width,
                   grColor         color )
 {
-  line += 4*x;
+  uint32_t*  line = (uint32_t*)_line + x;
 
-  /* clearly slow */
-  for (; width > 0; width--, line += 4)
-  {
-    line[0] = color.chroma[0];
-    line[1] = color.chroma[1];
-    line[2] = color.chroma[2];
-    line[3] = color.chroma[3];
-  }
+  for ( ; width > 0; width-- )
+    *line++ = color.value;
 }
 
 
@@ -228,7 +222,7 @@ grFillRect( grBitmap*   target,
 
   if ( x < 0 )
   {
-    width -= x;
+    width += x;
     x      = 0;
   }
   delta = x + width - target->width;

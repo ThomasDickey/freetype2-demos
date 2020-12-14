@@ -2,7 +2,7 @@
 /*                                                                          */
 /*  The FreeType project -- a free and portable quality TrueType renderer.  */
 /*                                                                          */
-/*  Copyright (C) 1996-2019 by                                              */
+/*  Copyright (C) 1996-2020 by                                              */
 /*  D. Turner, R.Wilhelm, and W. Lemberg                                    */
 /*                                                                          */
 /*  grblit.c: Support for blitting of bitmaps with various depth.           */
@@ -456,7 +456,7 @@
     do
     {
       unsigned char*  _read  = read;
-      unsigned char*  _write = write;
+      uint32_t*       _write = (uint32_t*)write;
       unsigned long   val    = ((unsigned long)*_read++ | 0x100L ) << shift;
 
       x = blit->width;
@@ -466,20 +466,10 @@
           val = *_read++ | 0x100L;
 
         if ( val & 0x80 )
-        {
-          /* this could be greatly optimized as                         */
-          /*                                                            */
-          /*   *(long*)_write = color.value                             */
-          /*                                                            */
-          /* but it wouldn't work on 64-bits systems... stupid C types! */
-          _write[0] = color.chroma[0];
-          _write[1] = color.chroma[1];
-          _write[2] = color.chroma[2];
-          _write[3] = color.chroma[3];
-        }
+          *_write = color.value;
 
         val   <<= 1;
-        _write += 4;
+        _write++;
         x--;
 
       } while ( x > 0 );
@@ -575,7 +565,7 @@
       int          i;
       const byte*  table;
 
-      table = (const byte*)grAlloc( (unsigned long)( 3 * num_grays - 1 ) *
+      table = (const byte*)grAlloc( (size_t)( 3 * num_grays - 1 ) *
                                     sizeof ( byte ) );
       if (!table) return 0;
 
@@ -673,8 +663,7 @@
       const byte*  table;
       int          n;
 
-      table = (const byte*)grAlloc( (unsigned long)source_grays *
-                                    sizeof ( byte ) );
+      table = (const byte*)grAlloc( (size_t)source_grays * sizeof ( byte ) );
       if (!table)
         return 0;
 
@@ -865,9 +854,9 @@
                            grColor     color )
   {
     int             y;
-    int             sr = (color.chroma[0] << 7) & 0x7C00;
-    int             sg = (color.chroma[1] << 2) & 0x03E0;
-    int             sb = (color.chroma[2] >> 3) & 0x001F;
+    int             sr = color.value & 0x7C00;
+    int             sg = color.value & 0x03E0;
+    int             sb = color.value & 0x001F;
     unsigned char*  read;
     unsigned char*  write;
 
@@ -998,9 +987,9 @@
                            grColor     color )
   {
     int             y;
-    int             sr = (color.chroma[0] << 8) & 0xF800;
-    int             sg = (color.chroma[1] << 3) & 0x07E0;
-    int             sb = (color.chroma[2] >> 3) & 0x001F;
+    int             sr = color.value & 0xF800;
+    int             sg = color.value & 0x07E0;
+    int             sb = color.value & 0x001F;
     unsigned char*  read;
     unsigned char*  write;
 

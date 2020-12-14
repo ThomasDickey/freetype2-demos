@@ -4,7 +4,7 @@
  *
  *    Graphics Subsystem interface
  *
- *  Copyright (C) 1999-2019 by
+ *  Copyright (C) 1999-2020 by
  *     - The FreeType Development Team - www.freetype.org
  *
  ***************************************************************************/
@@ -12,6 +12,7 @@
 #ifndef GRAPH_H_
 #define GRAPH_H_
 
+#include "grtypes.h"
 #include "grevents.h"
 
  /*************************************************************************/
@@ -109,11 +110,10 @@
 
   typedef union grColor_
   {
-    long           value;
+    uint32_t       value;
     unsigned char  chroma[4];
 
   } grColor;
-
 
 
  /**********************************************************************
@@ -122,7 +122,7 @@
   *    grNewBitmap
   *
   * <Description>
-  *    creates a new bitmap
+  *    creates a new bitmap or resizes an existing one
   *
   * <Input>
   *    pixel_mode   :: the target surface's pixel_mode
@@ -139,6 +139,8 @@
   * <Note>
   *    This function really allocates a pixel buffer, zero it, then
   *    returns a descriptor for it.
+  *
+  *    An existing bitmap will be resized.
   *
   *    Call grDoneBitmap when you're done with it..
   *
@@ -256,6 +258,7 @@
                            int         y,
                            const char* string,
                            grColor     color );
+
 
  /**********************************************************************
   *
@@ -454,7 +457,6 @@
                                  grPixelMode*  *pixel_modes );
 
 
-
  /**********************************************************************
   *
   * <Function>
@@ -479,6 +481,9 @@
   *    handle to the corresponding surface object. 0 in case of error
   *
   * <Note>
+  *    If the requsted mode is gr_pixel_mode_mono, the driver can choose
+  *    a mode that is convenient for the driver.
+  *
   *    All drivers are _required_ to support at least the following
   *    pixel formats :
   *
@@ -501,6 +506,7 @@
                                    grBitmap*    bitmap );
 
   extern void  grDoneSurface( grSurface*  surface );
+
 
  /**********************************************************************
   *
@@ -543,7 +549,6 @@
   **********************************************************************/
 
   extern void  grRefreshSurface( grSurface*  surface );
-
 
 
  /**********************************************************************
@@ -628,6 +633,28 @@
                            const char* title_string );
 
 
+ /**********************************************************************
+  *
+  * <Function>
+  *    grSetIcon
+  *
+  * <Description>
+  *    set the icon of a given windowed surface.
+  *
+  * <Input>
+  *    surface :: handle to target surface
+  *    icon    :: handle to icon bitmap
+  *
+  * <Return>
+  *    the next appropriate icon size in pixels.
+  *
+  * <Note>
+  *    Returns the largest appropriate icon size if icon is NULL.
+  *
+  **********************************************************************/
+
+  extern int  grSetIcon( grSurface*  surface,
+                         grBitmap*   icon );
 
 
  /**********************************************************************
@@ -665,12 +692,35 @@
   *    blit glyphs
   *
   * <Input>
+  *    target     :: handle to target bitmap/surface
   *    gamma      :: gamma value. <= 0 to select sRGB transfer function
   *
   **********************************************************************/
 
   extern
   void  grSetTargetGamma( grBitmap*  target, double  gamma_value );
+
+
+ /**********************************************************************
+  *
+  * <Function>
+  *    grSetTargetPenBrush
+  *
+  * <Description>
+  *    set the pen position and brush color as required for direct mode.
+  *
+  * <Input>
+  *    target     :: handle to target bitmap/surface
+  *    x, y       :: pen position
+  *    color      :: color as defined by grFindColor
+  *
+  **********************************************************************/
+
+  extern
+  void  grSetTargetPenBrush( grBitmap*  target,
+                             int        x,
+                             int        y,
+                             grColor    color );
 
 /* */
 

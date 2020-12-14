@@ -2,7 +2,7 @@
 /*                                                                          */
 /*  The FreeType project -- a free and portable quality TrueType renderer.  */
 /*                                                                          */
-/*  Copyright (C) 1996-2019 by                                              */
+/*  Copyright (C) 1996-2020 by                                              */
 /*  D. Turner, R.Wilhelm, and W. Lemberg                                    */
 /*                                                                          */
 /*                                                                          */
@@ -249,9 +249,9 @@
     grSetMargin( 2, 1 );
     grGotobitmap( display->bitmap );
 
-    sprintf( buf,
-             "FreeType String Viewer - part of the FreeType %s test suite",
-             version );
+    snprintf( buf, sizeof ( buf ),
+              "FreeType String Viewer - part of the FreeType %s test suite",
+              version );
 
     grWriteln( buf );
     grLn();
@@ -265,6 +265,7 @@
     grWriteln( "  b         : toggle embedded bitmaps (and disable rotation)" );
     grWriteln( "  f         : toggle forced auto-hinting" );
     grWriteln( "  h         : toggle outline hinting" );
+    grWriteln( "  H         : change hinting engine" );
     grLn();
     grWriteln( "  1-4       : select rendering mode" );
     grWriteln( "  l         : cycle through anti-aliasing modes" );
@@ -274,8 +275,7 @@
     grWriteln( "  Tab       : cycle through sample strings" );
     grWriteln( "  V         : toggle vertical rendering" );
     grLn();
-    grWriteln( "  g         : increase gamma by 0.1" );
-    grWriteln( "  v         : decrease gamma by 0.1" );
+    grWriteln( "  g, v      : adjust gamma by 0.1" );
     grLn();
     grWriteln( "  n         : next font" );
     grWriteln( "  p         : previous font" );
@@ -402,7 +402,8 @@
       lcd_mode = " monochrome";
     }
 
-    sprintf( status.header_buffer, "mode changed to %s", lcd_mode );
+    snprintf( status.header_buffer, sizeof ( status.header_buffer ),
+              "mode changed to %s", lcd_mode );
     status.header = status.header_buffer;
   }
 
@@ -411,8 +412,8 @@
   event_color_change( void )
   {
     static int     i = 0;
-    unsigned char  r = i & 4 ? 0xff : 0;
-    unsigned char  g = i & 2 ? 0xff : 0;
+    unsigned char  r = i & 2 ? 0xff : 0;
+    unsigned char  g = i & 4 ? 0xff : 0;
     unsigned char  b = i & 1 ? 0xff : 0;
 
 
@@ -434,19 +435,6 @@
     i++;
     if ( i >= (int)( sizeof( Sample ) / sizeof( Sample[0] ) ) )
       i = 0;
-  }
-
-  static void
-  event_gamma_change( double  delta )
-  {
-    display->gamma += delta;
-
-    if ( display->gamma > 3.0 )
-      display->gamma = 3.0;
-    else if ( display->gamma < 0.1 )
-      display->gamma = 0.1;
-
-    grSetTargetGamma( display->bitmap, display->gamma );
   }
 
 
@@ -499,7 +487,12 @@
     if ( *status.keys )
       event.key = grKEY( *status.keys++ );
     else
+    {
       grListenSurface( display->surface, 0, &event );
+
+      if ( event.type == gr_event_resize )
+        return ret;
+    }
 
     if ( event.key >= '1' && event.key < '1' + N_RENDER_MODES )
     {
@@ -552,6 +545,10 @@
                         : "glyph hinting is now ignored";
       goto Flags;
 
+    case grKEY( 'H' ):
+      FTDemo_Hinting_Engine_Change( handle );
+      goto Flags;
+
     case grKEY( 'l' ):
       event_lcdmode_change();
       goto Flags;
@@ -595,11 +592,11 @@
       goto Exit;
 
     case grKEY( 'g' ):
-      event_gamma_change( 0.1 );
+      FTDemo_Display_Gamma_Change( display,  1 );
       goto Exit;
 
     case grKEY( 'v' ):
-      event_gamma_change( -0.1 );
+      FTDemo_Display_Gamma_Change( display, -1 );
       goto Exit;
 
     case grKEY( 'n' ):
@@ -679,7 +676,8 @@
       "            `.afm' or `.pfm').\n"
       "\n" );
     fprintf( stderr,
-      "  -d WxHxD  Set the window width, height, and color depth\n"
+      "  -d WxH[xD]\n"
+      "            Set the window width, height, and color depth\n"
       "            (default: 640x480x24).\n"
       "  -k keys   Emulate sequence of keystrokes upon start-up.\n"
       "            If the keys contain `q', use batch mode.\n"
@@ -978,6 +976,7 @@
 
     grSetTitle( display->surface,
                 "FreeType String Viewer - press ? for help" );
+    FTDemo_Icon( handle, display );
 
     status.header = NULL;
 
@@ -985,7 +984,6 @@
       event_text_change();
 
     event_color_change();
-    event_gamma_change( 0 );
 
     event_font_change( 0 );
     FTDemo_String_Set( handle, status.text );

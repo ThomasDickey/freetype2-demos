@@ -15,10 +15,14 @@ space := $(empty) $(empty)
 # TOP_DIR is the directory where the main FreeType source is found,
 # as well as the `config.mk' file.
 #
-# TOP_DIR_2 is the directory is the top of the demonstration
+# TOP_DIR_2 is the directory containing the top of the demonstration
 # programs directory.
 #
 # OBJ_DIR gives the objects directory of the FreeType library.
+#
+# IF DEVEL_DIR is set, do a development build (i.e., use development
+# versions of the FreeType configuration header files `ft2build.h'
+# and `ftoption.h' given in this directory).
 #
 TOP_DIR   ?= ../freetype2
 TOP_DIR_2 ?= .
@@ -51,7 +55,7 @@ endif
 ####################################################################
 #
 # Check that we have a working `config.mk' in the above directory.
-# If not, issue a warning message, then stop there.
+# Otherwise issue a warning message and stop.
 #
 ifeq ($(wildcard $(CONFIG_MK)),)
   no_config_mk := 1
@@ -122,17 +126,15 @@ else
   endif
 
   FT_INCLUDES := $(OBJ_BUILD) \
-                 $(BUILD_DIR) \
                  $(DEVEL_DIR) \
                  $(TOP_DIR)/include \
+                 $(TOP_DIR)/src/dlg \
                  $(SRC_DIR)
 
-  COMPILE = $(CC) $(CPPFLAGS) \
-                  $(CFLAGS) \
-                  $(ANSIFLAGS) \
+  COMPILE = $(CC) $(ANSIFLAGS) \
                   $(INCLUDES:%=$I%) \
-                  $DFT_CONFIG_OPTIONS_H="<ftoption.h>" \
-                  $DFT_CONFIG_MODULES_H="<ftmodule.h>"
+                  $(CPPFLAGS) \
+                  $(CFLAGS)
 
   # Enable C99 for gcc to avoid warnings.
   # Note that clang++ aborts with an error if we use `-std=C99',
@@ -163,15 +165,15 @@ else
   LINK_ITEMS = $T$(subst /,$(COMPILER_SEP),$@ $<)
 
   ifeq ($(PLATFORM),unix)
-    CC        = $(CCraw)
-    LINK_CMD  = $(subst /,$(SEP),$(OBJ_BUILD)/libtool) \
-                --mode=link $(CC) \
-                $(subst /,$(COMPILER_SEP),$(LDFLAGS))
-    LINK_LIBS = $(subst /,$(COMPILER_SEP),$(FTLIB) $(EFENCE)) $(LIB_CLOCK_GETTIME)
+    override CC = $(CCraw)
+    LINK_CMD    = $(subst /,$(SEP),$(OBJ_BUILD)/libtool) \
+                  --mode=link $(CC) \
+                  $(subst /,$(COMPILER_SEP),$(LDFLAGS))
+    LINK_LIBS   = $(subst /,$(COMPILER_SEP),$(FTLIB) $(EFENCE)) $(LIB_CLOCK_GETTIME)
   else
     LINK_CMD = $(CC) $(subst /,$(COMPILER_SEP),$(LDFLAGS))
     ifeq ($(PLATFORM),unixdev)
-      LINK_LIBS = $(subst /,$(COMPILER_SEP),$(FTLIB) $(EFENCE)) -lm -lrt -lz -lbz2
+      LINK_LIBS := $(subst /,$(COMPILER_SEP),$(FTLIB) $(EFENCE)) -lm -lrt -lz -lbz2 -lpthread
       LINK_LIBS += $(shell pkg-config --libs libpng)
       LINK_LIBS += $(shell pkg-config --libs harfbuzz)
       LINK_LIBS += $(shell pkg-config --libs libbrotlidec)
@@ -332,9 +334,11 @@ else
   # Rules for compiling object files for text-only demos.
   #
   $(OBJ_DIR_2)/common.$(SO): $(SRC_DIR)/common.c
+  $(OBJ_DIR_2)/strbuf.$(SO): $(SRC_DIR)/strbuf.c
   $(OBJ_DIR_2)/output.$(SO): $(SRC_DIR)/output.c
   $(OBJ_DIR_2)/mlgetopt.$(SO): $(SRC_DIR)/mlgetopt.c
   COMMON_OBJ := $(OBJ_DIR_2)/common.$(SO) \
+                $(OBJ_DIR_2)/strbuf.$(SO) \
                 $(OBJ_DIR_2)/output.$(SO) \
                 $(OBJ_DIR_2)/mlgetopt.$(SO)
 

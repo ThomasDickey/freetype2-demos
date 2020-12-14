@@ -2,7 +2,7 @@
 /*                                                                          */
 /*  The FreeType project -- a free and portable quality TrueType renderer.  */
 /*                                                                          */
-/*  Copyright (C) 2005-2019 by                                              */
+/*  Copyright (C) 2005-2020 by                                              */
 /*  D. Turner, R.Wilhelm, and W. Lemberg                                    */
 /*                                                                          */
 /*                                                                          */
@@ -89,6 +89,11 @@
   FTDemo_Display*
   FTDemo_Display_New( const char*  device,
                       const char*  dims );
+
+
+  void
+  FTDemo_Display_Gamma_Change( FTDemo_Display*  display,
+                               int              dir );
 
 
   void
@@ -238,7 +243,13 @@
   /* append version information */
   void
   FTDemo_Version( FTDemo_Handle*  handle,
-                  FT_String*      str );
+                  FT_String       str[64] );
+
+
+  /* add FT window icon */
+  void
+  FTDemo_Icon( FTDemo_Handle*   handle,
+               FTDemo_Display*  display );
 
 
   /* install a font */
@@ -280,6 +291,11 @@
   FT_Error
   FTDemo_Get_Size( FTDemo_Handle*  handle,
                    FT_Size*        asize );
+
+
+  /* switch to a different engine if possible, including warping */
+  int
+  FTDemo_Hinting_Engine_Change( FTDemo_Handle*  handle );
 
 
   /* draw common header */

@@ -2,7 +2,7 @@
 /*                                                                          */
 /*  The FreeType project -- a free and portable quality TrueType renderer.  */
 /*                                                                          */
-/*  Copyright (C) 2007-2019 by                                              */
+/*  Copyright (C) 2007-2020 by                                              */
 /*  D. Turner, R.Wilhelm, and W. Lemberg                                    */
 /*                                                                          */
 /*                                                                          */
@@ -21,11 +21,10 @@
 #include FT_LCD_FILTER_H
 #include FT_DRIVER_H
 
-  /* showing driver name -- the two internal header files */
-  /* shouldn't be used in normal programs                 */
+  /* showing driver name -- the internal header file */
+  /* shouldn't be used in normal programs            */
 #include FT_MODULE_H
-#include FT_INTERNAL_OBJECTS_H
-#include FT_INTERNAL_DRIVER_H
+#include <freetype/internal/ftobjs.h>
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -460,19 +459,17 @@
           fn = face->family_name;
         else
           fn = (char*)"(unknown family)";
-        family_name = (char*)malloc( strlen( fn ) + 1 );
+        family_name = ft_strdup( fn );
         if ( family_name == NULL )
           panic( "ftdiff: not enough memory\n" );
-        strcpy( family_name, fn );
 
         if ( face->style_name )
           sn = face->style_name;
         else
           sn = (char*)"(unknown style)";
-        style_name = (char*)malloc( strlen( sn ) + 1 );
+        style_name = ft_strdup( sn );
         if ( style_name == NULL )
           panic( "ftdiff: not enough memory\n" );
-        strcpy( style_name, sn );
 
         faces[num_faces].filepath    = files[0];
         faces[num_faces].index       = count;
@@ -876,8 +873,8 @@
       else if ( rmode == HINT_MODE_AUTOHINT )
         extra = warping ? " (+warp)" : " (-warp)";
 
-      sprintf( temp, "%s%s",
-               render_mode_names[column->hint_mode], extra );
+      snprintf( temp, sizeof ( temp ), "%s%s",
+                render_mode_names[column->hint_mode], extra );
       state->display.disp_text( disp, left,
                                 bottom + 5, temp );
 
@@ -896,19 +893,19 @@
           unsigned char*  fw  = column->filter_weights;
 
 
-          sprintf( temp,
-                   "%s0x%02X%s0x%02X%s0x%02X%s0x%02X%s0x%02X%s",
-                   fwi == 0 ? "[" : " ",
-                     fw[0],
-                   fwi == 0 ? "]" : ( fwi == 1 ? "[" : " " ),
-                     fw[1],
-                   fwi == 1 ? "]" : ( fwi == 2 ? "[" : " " ),
-                     fw[2],
-                   fwi == 2 ? "]" : ( fwi == 3 ? "[" : " " ),
-                     fw[3],
-                   fwi == 3 ? "]" : ( fwi == 4 ? "[" : " " ),
-                     fw[4],
-                   fwi == 4 ? "]" : " " );
+          snprintf( temp, sizeof ( temp ),
+                    "%s0x%02X%s0x%02X%s0x%02X%s0x%02X%s0x%02X%s",
+                    fwi == 0 ? "[" : " ",
+                      fw[0],
+                    fwi == 0 ? "]" : ( fwi == 1 ? "[" : " " ),
+                      fw[1],
+                    fwi == 1 ? "]" : ( fwi == 2 ? "[" : " " ),
+                      fw[2],
+                    fwi == 2 ? "]" : ( fwi == 3 ? "[" : " " ),
+                      fw[3],
+                    fwi == 3 ? "]" : ( fwi == 4 ? "[" : " " ),
+                      fw[4],
+                    fwi == 4 ? "]" : " " );
           state->display.disp_text( disp, left,
                                     bottom + 2 * HEADER_HEIGHT + 5, temp );
         }
@@ -939,13 +936,13 @@
                                   bottom + 2 * HEADER_HEIGHT + 5, msg );
       }
 
-      sprintf( temp, "%s %s %s",
-               column->use_kerning ? "+kern"
-                                   : "-kern",
-               column->use_deltas ? "+delta"
-                                  : "-delta",
-               column->use_cboxes ? "glyph boxes"
-                                  : "adv. widths" );
+      snprintf( temp, sizeof ( temp ), "%s %s %s",
+                column->use_kerning ? "+kern"
+                                    : "-kern",
+                column->use_deltas ? "+delta"
+                                   : "-delta",
+                column->use_cboxes ? "glyph boxes"
+                                   : "adv. widths" );
       state->display.disp_text( disp, left,
                                 bottom + 3 * HEADER_HEIGHT + 5, temp );
 
@@ -1036,7 +1033,7 @@
     if ( bit->mode == gr_pixel_mode_gray )
       memset( bit->buffer,
               display->back_color.value,
-              (unsigned int)( pitch * bit->rows ) );
+              (size_t)pitch * (size_t)bit->rows );
     else
     {
       unsigned char*  p = bit->buffer;
@@ -1143,7 +1140,7 @@
     FT_Library_Version( state->library, &major, &minor, &patch );
 
     format = patch ? "%d.%d.%d" : "%d.%d";
-    sprintf( version, format, major, minor, patch );
+    snprintf( version, sizeof ( version ), format, major, minor, patch );
 
     adisplay_clear( display );
     grSetLineHeight( 10 );
@@ -1151,9 +1148,10 @@
     grSetMargin( 2, 1 );
     grGotobitmap( display->bitmap );
 
-    sprintf( buf,
-             "FreeType Hinting Mode Comparator - part of the FreeType %s test suite",
-             version );
+    snprintf( buf, sizeof ( buf ),
+              "FreeType Hinting Mode Comparator -"
+                " part of the FreeType %s test suite",
+              version );
 
     grWriteln( buf );
     grLn();
@@ -1479,21 +1477,21 @@
 
 
     basename = ft_basename( state->filename );
-    sprintf( buf, "%.50s %.50s (file `%.100s')",
-                  face->family_name,
-                  face->style_name,
-                  basename );
-    grWriteCellString( adisplay->bitmap, 0, 5,
+    snprintf( buf, sizeof ( buf ), "%.50s %.50s (file `%.100s')",
+              face->family_name,
+              face->style_name,
+              basename );
+    grWriteCellString( adisplay->bitmap, 0, 2,
                        buf, adisplay->fore_color );
 
     if ( adisplay->gamma != 0.0 )
-      sprintf( gamma, "%.1f", adisplay->gamma );
-    sprintf( buf, "%.1fpt (%dppem) at %ddpi, gamma: %s",
-                  state->char_size,
-                  (int)(state->char_size * state->resolution / 72 + 0.5),
-                  state->resolution,
-                  gamma );
-    grWriteCellString( adisplay->bitmap, 0, 5 + HEADER_HEIGHT,
+      snprintf( gamma, sizeof ( gamma ), "%.1f", adisplay->gamma );
+    snprintf( buf, sizeof ( buf ), "%.1fpt (%dppem) at %udpi, gamma: %s",
+              state->char_size,
+              (int)( state->char_size * state->resolution / 72 + 0.5 ),
+              state->resolution,
+              gamma );
+    grWriteCellString( adisplay->bitmap, 0, 2 + HEADER_HEIGHT,
                        buf, adisplay->fore_color );
 
   }
@@ -1594,18 +1592,18 @@
         fprintf( stderr, "could not read textfile '%s'\n", textfile );
       else
       {
-        int  tsize;
+        size_t  tsize;
 
 
         fseek( tfile, 0, SEEK_END );
-        tsize = ftell( tfile );
+        tsize = (size_t)ftell( tfile );
 
         fseek( tfile, 0, SEEK_SET );
-        text = (char*)malloc( (unsigned int)( tsize + 1 ) );
+        text = (char*)malloc( tsize + 1 );
 
         if ( text )
         {
-          if ( !fread( text, (unsigned int)tsize, 1, tfile ) )
+          if ( !fread( text, tsize, 1, tfile ) )
           {
             fprintf( stderr, "read error\n" );
             text = (char *)default_text;
@@ -1689,8 +1687,14 @@
 
       write_global_info( state );
       grRefreshSurface( adisplay->surface );
+
       grListenSurface( adisplay->surface, 0, &event );
-      if ( process_event( state, &event ) )
+      if ( event.type == gr_event_resize )
+      {
+        width  = event.x;
+        height = event.y;
+      }
+      else if ( process_event( state, &event ) )
         break;
     }
 

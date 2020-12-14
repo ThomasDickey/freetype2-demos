@@ -2,7 +2,7 @@
 /*                                                                          */
 /*  The FreeType project -- a free and portable quality TrueType renderer.  */
 /*                                                                          */
-/*  Copyright (C) 1996-2019 by                                              */
+/*  Copyright (C) 1996-2020 by                                              */
 /*  D. Turner, R.Wilhelm, and W. Lemberg                                    */
 /*                                                                          */
 /*                                                                          */
@@ -55,6 +55,7 @@
 #include FT_FREETYPE_H
 #include FT_MULTIPLE_MASTERS_H
 #include "common.h"
+#include "strbuf.h"
 #include "mlgetopt.h"
 
 #include FT_DRIVER_H
@@ -87,18 +88,24 @@
   static unsigned int  dflt_tt_interpreter_version;
 
   /* number formats */
-  static FT_Bool  use_float = 0; /* for points                   */
-  static FT_Bool  use_hex   = 1; /* for integers (except points) */
+  enum {
+    FORMAT_INTEGER,
+    FORMAT_FLOAT,
+    FORMAT_64TH
+  };
 
+  static int      num_format = FORMAT_INTEGER; /* for points      */
+  static FT_Bool  use_hex    = 1;              /* for integers    */
+                                               /* (except points) */
   static FT_Error  error;
 
 
   typedef char  ByteStr[2];
   typedef char  WordStr[4];
   typedef char  LongStr[8];
-  typedef char  DebugStr[128];
 
-  static DebugStr  tempStr;
+  static char   tempStr[256];
+  static char   temqStr[256];
 
 
   typedef struct  Storage_
@@ -1656,19 +1663,20 @@
   static const FT_String*
   Cur_U_Line( TT_ExecContext  exc )
   {
-    FT_String  s[32];
-    FT_Int     op, i, n;
+    FT_Int  op, i, n;
+    StrBuf  bs[1];
 
 
     op = CUR.code[CUR.IP];
 
-    sprintf( tempStr, "%s", OpStr[op] );
+    strbuf_init( bs, tempStr, sizeof ( tempStr ) );
+    strbuf_reset( bs );
+    strbuf_add( bs, OpStr[op] );
 
     if ( op == 0x40 )  /* NPUSHB */
     {
       n = CUR.code[CUR.IP + 1];
-      sprintf( s, "(%d)", n );
-      strncat( tempStr, s, 8 );
+      strbuf_format( bs, "(%d)", n );
 
       /* limit output */
       if ( n > 20 )
@@ -1676,19 +1684,14 @@
 
       for ( i = 0; i < n; i++ )
       {
-        const FT_String*  temp;
-
-
-        temp = use_hex ? " $%02x" : " %d";
-        sprintf( s, temp, CUR.code[CUR.IP + i + 2] );
-        strncat( tempStr, s, 8 );
+        strbuf_format( bs, ( use_hex ? " $%02x" : " %d" ),
+                       CUR.code[CUR.IP + i + 2] );
       }
     }
     else if ( op == 0x41 )  /* NPUSHW */
     {
       n = CUR.code[CUR.IP + 1];
-      sprintf( s, "(%d)", n );
-      strncat( tempStr, s, 8 );
+      strbuf_format( bs, "(%d)", n );
 
       /* limit output */
       if ( n > 20 )
@@ -1697,9 +1700,9 @@
       for ( i = 0; i < n; i++ )
       {
         if ( use_hex )
-          sprintf( s, " $%02x%02x",
-                      CUR.code[CUR.IP + i * 2 + 2],
-                      CUR.code[CUR.IP + i * 2 + 3] );
+          strbuf_format( bs, " $%02x%02x",
+                         CUR.code[CUR.IP + i * 2 + 2],
+                         CUR.code[CUR.IP + i * 2 + 3] );
         else
         {
           unsigned short  temp;
@@ -1707,10 +1710,8 @@
 
           temp = (unsigned short)( ( CUR.code[CUR.IP + i * 2 + 2] << 8 ) +
                                      CUR.code[CUR.IP + i * 2 + 3]        );
-          sprintf( s, " %d",
-                      (signed short)temp );
+          strbuf_format( bs, " %u", temp );
         }
-        strncat( tempStr, s, 8 );
       }
     }
     else if ( ( op & 0xF8 ) == 0xB0 )  /* PUSHB */
@@ -1719,12 +1720,8 @@
 
       for ( i = 0; i <= n; i++ )
       {
-        const FT_String*  temp;
-
-
-        temp = use_hex ? " $%02x" : " %d";
-        sprintf( s, temp, CUR.code[CUR.IP + i + 1] );
-        strncat( tempStr, s, 8 );
+        strbuf_format( bs, ( use_hex ? " $%02x" : " %d" ),
+                       CUR.code[CUR.IP + i + 1] );
       }
     }
     else if ( ( op & 0xF8 ) == 0xB8 )  /* PUSHW */
@@ -1734,9 +1731,9 @@
       for ( i = 0; i <= n; i++ )
       {
         if ( use_hex )
-          sprintf( s, " $%02x%02x",
-                      CUR.code[CUR.IP + i * 2 + 1],
-                      CUR.code[CUR.IP + i * 2 + 2] );
+          strbuf_format( bs, " $%02x%02x",
+                         CUR.code[CUR.IP + i * 2 + 1],
+                         CUR.code[CUR.IP + i * 2 + 2] );
         else
         {
           unsigned short  temp;
@@ -1744,19 +1741,16 @@
 
           temp = (unsigned short)( ( CUR.code[CUR.IP + i * 2 + 1] << 8 ) +
                                      CUR.code[CUR.IP + i * 2 + 2]        );
-          sprintf( s, " %d",
-                      (signed short)temp );
+          strbuf_format( bs, " %d", (signed short)temp );
         }
-        strncat( tempStr, s, 8 );
       }
     }
     else if ( op == 0x39 )  /* IP */
     {
-      sprintf( s, " rp1=%d, rp2=%d", CUR.GS.rp1, CUR.GS.rp2 );
-      strncat( tempStr, s, 31 );
+      strbuf_format( bs, " rp1=%d, rp2=%d", CUR.GS.rp1, CUR.GS.rp2 );
     }
 
-    return (FT_String*)tempStr;
+    return (FT_String*)strbuf_value( bs );
   }
 
 
@@ -1778,6 +1772,35 @@
         storage[idx].value       = value;
       }
     }
+  }
+
+
+  /*
+   * Ugly: `format_64th_neg0` gives the format for 64th values in the range
+   *       ]-1,0[: We want to display `-0'23`, for example, and to get the
+   *       minus sign at that position automatically is not possible since
+   *       you can't make `printf` print `-0` for integers.
+   */
+  static void
+  print_number( FT_Long      value,
+                const char*  format_64th,
+                const char*  format_64th_neg0,
+                const char*  format_float,
+                const char*  format_integer )
+  {
+    if ( num_format == FORMAT_64TH )
+    {
+      if ( value > -64 && value < 0 )
+        printf( format_64th_neg0, -value % 64 );
+      else
+        printf( format_64th,
+                value / 64,
+                ( value < 0 ? -value : value ) % 64 );
+    }
+    else if ( num_format == FORMAT_FLOAT )
+      printf( format_float, value / 64.0 );
+    else
+      printf( format_integer, value );
   }
 
 
@@ -1823,40 +1846,32 @@
                 prev->tags[A] & FT_CURVE_TAG_TOUCH_Y ? 'Y' : ' ' );
 
         if ( diff & 1 )
-          temp = use_float ? "(%8.2f)" : "(%8ld)";
+          print_number( prev->org[A].x,
+                        "(%5ld'%2ld)", "(   -0'%2ld)", "(%8.2f)", "(%8ld)" );
         else
-          temp = use_float ? " %8.2f " : " %8ld ";
-        if ( use_float )
-          printf( temp, prev->org[A].x / 64.0 );
-        else
-          printf( temp, prev->org[A].x );
+          print_number( prev->org[A].x,
+                        " %5ld'%2ld ", "    -0'%2ld ", " %8.2f ", " %8ld " );
 
         if ( diff & 2 )
-          temp = use_float ? "(%8.2f)" : "(%8ld)";
+          print_number( prev->org[A].y,
+                        "(%5ld'%2ld)", "(   -0'%2ld)", "(%8.2f)", "(%8ld)" );
         else
-          temp = use_float ? " %8.2f " : " %8ld ";
-        if ( use_float )
-          printf( temp, prev->org[A].y / 64.0 );
-        else
-          printf( temp, prev->org[A].y );
+          print_number( prev->org[A].y,
+                        " %5ld'%2ld ", "    -0'%2ld ", " %8.2f ", " %8ld " );
 
         if ( diff & 4 )
-          temp = use_float ? "(%8.2f)" : "(%8ld)";
+          print_number( prev->cur[A].x,
+                        "(%5ld'%2ld)", "(   -0'%2ld)", "(%8.2f)", "(%8ld)" );
         else
-          temp = use_float ? " %8.2f " : " %8ld ";
-        if ( use_float )
-          printf( temp, prev->cur[A].x / 64.0 );
-        else
-          printf( temp, prev->cur[A].x );
+          print_number( prev->cur[A].x,
+                        " %5ld'%2ld ", "    -0'%2ld ", " %8.2f ", " %8ld " );
 
         if ( diff & 8 )
-          temp = use_float ? "(%8.2f)" : "(%8ld)";
+          print_number( prev->cur[A].y,
+                        "(%5ld'%2ld)", "(   -0'%2ld)", "(%8.2f)", "(%8ld)" );
         else
-          temp = use_float ? " %8.2f " : " %8ld ";
-        if ( use_float )
-          printf( temp, prev->cur[A].y / 64.0 );
-        else
-          printf( temp, prev->cur[A].y );
+          print_number( prev->cur[A].y,
+                        " %5ld'%2ld ", "    -0'%2ld ", " %8.2f ", " %8ld " );
 
         printf( "\n" );
 
@@ -1872,40 +1887,28 @@
                 curr->tags[A] & FT_CURVE_TAG_TOUCH_Y ? 'Y' : ' ' );
 
         if ( diff & 1 )
-          temp = use_float ? "[%8.2f]" : "[%8ld]";
+          print_number( curr->org[A].x,
+                        "[%5ld'%2ld]", "[   -0'%2ld]", "[%8.2f]", "[%8ld]" );
         else
-          temp = "          ";
-        if ( use_float )
-          printf( temp, curr->org[A].x / 64.0 );
-        else
-          printf( temp, curr->org[A].x );
+          printf( "          ");
 
         if ( diff & 2 )
-          temp = use_float ? "[%8.2f]" : "[%8ld]";
+          print_number( curr->org[A].y,
+                        "[%5ld'%2ld]", "[   -0'%2ld]", "[%8.2f]", "[%8ld]" );
         else
-          temp = "          ";
-        if ( use_float )
-          printf( temp, curr->org[A].y / 64.0 );
-        else
-          printf( temp, curr->org[A].y );
+          printf( "          ");
 
         if ( diff & 4 )
-          temp = use_float ? "[%8.2f]" : "[%8ld]";
+          print_number( curr->cur[A].x,
+                        "[%5ld'%2ld]", "[   -0'%2ld]", "[%8.2f]", "[%8ld]" );
         else
-          temp = "          ";
-        if ( use_float )
-          printf( temp, curr->cur[A].x / 64.0 );
-        else
-          printf( temp, curr->cur[A].x );
+          printf( "          ");
 
         if ( diff & 8 )
-          temp = use_float ? "[%8.2f]" : "[%8ld]";
+          print_number( curr->cur[A].y,
+                        "[%5ld'%2ld]", "[   -0'%2ld]", "[%8.2f]", "[%8ld]" );
         else
-          temp = "          ";
-        if ( use_float )
-          printf( temp, curr->cur[A].y / 64.0 );
-        else
-          printf( temp, curr->cur[A].y );
+          printf( "          ");
 
         printf( "\n" );
       }
@@ -1950,22 +1953,19 @@
                 : ( A >= n_points - 4 )
                     ? "F"
                     : " " );
-      printf( "(%5ld,%5ld) - ",
+      printf( "(%5ld,%5ld)",
               zone->orus[A].x, zone->orus[A].y );
-      if ( use_float )
-      {
-        printf( "(%7.2f,%7.2f) - ",
-                zone->org[A].x / 64.0, zone->org[A].y / 64.0 );
-        printf( "(%7.2f,%7.2f) - ",
-                zone->cur[A].x / 64.0, zone->cur[A].y / 64.0 );
-      }
-      else
-      {
-        printf( "(%7ld,%7ld) - ",
-                zone->org[A].x, zone->org[A].y );
-        printf( "(%7ld,%7ld) - ",
-                zone->cur[A].x, zone->cur[A].y );
-      }
+      printf( " - " );
+      print_number( zone->org[A].x,
+                    "(%4ld'%2ld,", "(  -0'%2ld", "(%7.2f,", "(%7ld," );
+      print_number( zone->org[A].y,
+                    "%4ld'%2ld)", "  -0'%2ld)", "%7.2f)", "%7ld)" );
+      printf( " - " );
+      print_number( zone->cur[A].x,
+                    "(%4ld'%2ld,", "(  -0'%2ld", "(%7.2f,", "(%7ld," );
+      print_number( zone->cur[A].y,
+                    "%4ld'%2ld)", "  -0'%2ld)", "%7.2f)", "%7ld)" );
+      printf( " - " );
       printf( "%c%c%c\n",
               zone->tags[A] & FT_CURVE_TAG_ON ? 'P' : 'C',
               zone->tags[A] & FT_CURVE_TAG_TOUCH_X ? 'X' : ' ',
@@ -1999,7 +1999,7 @@
 
     const FT_String*  code_range;
 
-    const FT_String*  round_str[8] =
+    static const FT_String*  round_str[8] =
     {
       "to half-grid",
       "to grid",
@@ -2079,35 +2079,36 @@
         /* [loc]:[addr] [opcode]  [disassembly]         [a][b]|[c][d]      */
 
         {
-          char  temp[90];
-          int   n, col, pop;
-          int   args;
+          StrBuf  temp[1];
+          int     n, col, pop;
+          int     args;
 
 
-          sprintf( temp, "%78c\n", ' ' );
+          strbuf_init( temp, temqStr, sizeof ( temqStr ) );
+          strbuf_reset( temp );
 
           /* first letter of location */
           switch ( CUR.curRange )
           {
           case tt_coderange_glyph:
-            temp[0] = 'g';
+            strbuf_addc( temp, 'g' );
             break;
 
           case tt_coderange_cvt:
-            temp[0] = 'c';
+            strbuf_addc( temp, 'c' );
             break;
 
           default:
-            temp[0] = 'f';
+            strbuf_addc( temp, 'f' );
           }
 
           /* current IP */
-          sprintf( temp + 1, "%04lx: %02x  %-36.36s",
-                             CUR.IP,
-                             CUR.opcode,
-                             Cur_U_Line( &CUR ) );
+          strbuf_format( temp, "%04lx: %02x  %-36.36s",
+                         CUR.IP,
+                         CUR.opcode,
+                         Cur_U_Line( &CUR ) );
 
-          strncpy( temp + 46, " (", 3 );
+          strbuf_add( temp, " (" );
 
           args = CUR.top - 1;
           pop  = Pop_Push_Count[CUR.opcode] >> 4;
@@ -2123,7 +2124,12 @@
 
 
             if ( pop == 0 )
-              temp[col - 1] = temp[col - 1] == '(' ? ' ' : ')';
+            {
+              char* last = strbuf_back( temp );
+
+
+              *last = ( *last == '(' ) ? ' ' : ')';
+            }
 
             if ( args >= 0 )
             {
@@ -2134,13 +2140,12 @@
               {
                 /* we display signed hexadecimal numbers, which */
                 /* is easier to read and needs less space       */
-                num_chars = sprintf( temp + col, "%s%04lx",
-                                                 val < 0 ? "-" : "",
-                                                 val < 0 ? -val : val );
+                num_chars = strbuf_format( temp, "%s%04lx",
+                                           val < 0 ? "-" : "",
+                                           val < 0 ? -val : val );
               }
               else
-                num_chars = sprintf( temp + col, "%ld",
-                                                 val );
+                num_chars = strbuf_format( temp, "%ld", val );
 
               if ( col + num_chars >= 78 )
                 break;
@@ -2148,19 +2153,18 @@
             else
               num_chars = 0;
 
-            temp[col + num_chars] = ' ';
-            col                  += num_chars + 1;
+            strbuf_addc( temp, ' ' );
+            col += num_chars + 1;
 
             pop--;
             args--;
           }
 
           for ( n = col; n < 78; n++ )
-            temp[n] = ' ';
+            strbuf_addc( temp, ' ' );
 
-          temp[78] = '\n';
-          temp[79] = '\0';
-          printf( "%s", temp );
+          strbuf_addc( temp, '\n' );
+          printf( "%s", strbuf_value( temp ) );
         }
 
         /* First, check for empty stack and overflow */
@@ -2221,17 +2225,17 @@
           printf(
             "ttdebug Help\n"
             "\n"
-            "Q   quit debugger                       V   show vector info\n"
-            "R   restart debugger                    G   show graphics state\n"
-            "c   continue to next code range         P   show points zone\n"
-            "n   skip to next instruction            T   show twilight zone\n"
-            "s   step into function                  S   show storage area\n"
-            "f   finish current function             C   show CVT data\n"
-            "l   show last bytecode instruction      K   show full stack\n"
-            "b   toggle breakpoint at curr. pos.     B   show backtrace\n"
-            "p   toggle breakpoint at prev. pos.     O   show opcode docstring\n"
-            "F   toggle floating/fixed point format\n"
-            "I   toggle hex/decimal integer format   H   show format help\n"
+            "Q   quit debugger                         V   show vector info\n"
+            "R   restart debugger                      G   show graphics state\n"
+            "c   continue to next code range           P   show points zone\n"
+            "n   skip to next instruction              T   show twilight zone\n"
+            "s   step into function                    S   show storage area\n"
+            "f   finish current function               C   show CVT data\n"
+            "l   show last bytecode instruction        K   show full stack\n"
+            "b   toggle breakpoint at curr. position   B   show backtrace\n"
+            "p   toggle breakpoint at prev. position   O   show opcode docstring\n"
+            "F   cycle value format (int, float, 64th)\n"
+            "I   toggle hex/decimal integer format     H   show format help\n"
             "\n" );
           break;
 
@@ -2272,11 +2276,15 @@
             "\n" );
           break;
 
-        /* Toggle between floating and fixed point format */
+        /* Cycle through number formats */
         case 'F':
-          use_float = !use_float;
+          num_format = ( num_format + 1 ) % 3;
           printf( "Use %s point format for displaying non-integer values.\n",
-                  use_float ? "floating" : "fixed" );
+                  ( num_format == FORMAT_64TH )
+                    ? "64th"
+                    : ( num_format == FORMAT_FLOAT )
+                      ? "floating"
+                      : "fixed" );
           printf( "\n" );
           break;
 
@@ -2290,7 +2298,8 @@
 
         /* Show vectors */
         case 'V':
-          if ( use_float )
+          /* it makes no sense to display these vectors with FORMAT_64TH */
+          if ( num_format != FORMAT_INTEGER )
           {
             /* 2.14 numbers */
             printf( "freedom    (%.5f, %.5f)\n",
@@ -2337,21 +2346,14 @@
 
           printf( "rounding state      %s\n",
                   round_str[CUR.GS.round_state] );
-          if ( use_float )
-          {
-            /* 26.6 numbers */
-            printf( "minimum distance    %.2f\n",
-                    CUR.GS.minimum_distance / 64.0 );
-            printf( "CVT cut-in          %.2f\n",
-                    CUR.GS.control_value_cutin / 64.0 );
-          }
-          else
-          {
-            printf( "minimum distance    $%04lx\n",
-                    CUR.GS.minimum_distance );
-            printf( "CVT cut-in          $%04lx\n",
-                    CUR.GS.control_value_cutin );
-          }
+
+          printf( "minimum distance    " );
+          print_number( CUR.GS.minimum_distance,
+                        "%ld'%2ld\n", "-0'%2ld\n", "%.2f\n", "$%04lx\n" );
+          printf( "CVT cut-in          " );
+          print_number( CUR.GS.control_value_cutin,
+                        "%ld'%2ld\n", "-0'%2ld\n", "%.2f\n", "$%04lx\n" );
+
           printf( "ref. points 0,1,2   %d, %d, %d\n",
                   CUR.GS.rp0, CUR.GS.rp1, CUR.GS.rp2 );
           printf( "\n" );
@@ -2369,12 +2371,28 @@
 
               printf( "Control Value Table (CVT) data\n"
                       "\n" );
-              printf( " idx         value       \n"
-                      "-------------------------\n" );
+              printf( " idx         value\n"
+                      "-----------------------------------\n" );
 
               for ( i = 0; i < CUR.cvtSize; i++ )
-                printf( "%3ldC  %8ld (%8.2f)\n",
-                        i, CUR.cvt[i], CUR.cvt[i] / 64.0 );
+              {
+                FT_Long  v = CUR.cvt[i];
+
+
+                if ( v > -64 && v < 0 )
+                  printf( "%3ldC  %8ld (   -0'%2ld, %8.2f)\n",
+                          i,
+                          v,
+                          -v % 64,
+                          v / 64.0 );
+                else
+                  printf( "%3ldC  %8ld (%5ld'%2ld, %8.2f)\n",
+                          i,
+                          v,
+                          v / 64,
+                          ( v < 0 ? -v : v ) % 64,
+                          v / 64.0 );
+              }
               printf( "\n" );
             }
           }
@@ -2392,16 +2410,30 @@
 
               printf( "Storage Area\n"
                       "\n" );
-              printf( " idx         value       \n"
-                      "-------------------------\n" );
+              printf( " idx         value\n"
+                      "----------------------------------\n" );
 
               for ( i = 0; i < CUR.storeSize; i++ )
               {
                 if ( storage[i].initialized )
-                  printf( "%3ldS  %8ld (%8.2f)\n",
-                          i,
-                          storage[i].value,
-                          storage[i].value / 64.0 );
+                {
+                  FT_Long  v = storage[i].value;
+
+
+                  if ( v > -64 && v < 0 )
+                    printf( "%3ldS  %8ld (   -0'%2ld, %8.2f)\n",
+                            i,
+                            v,
+                            -v % 64,
+                            v / 64.0 );
+                  else
+                    printf( "%3ldS  %8ld (%5ld'%2ld, %8.2f)\n",
+                            i,
+                            v,
+                            v / 64,
+                            ( v < 0 ? -v : v ) % 64,
+                            v / 64.0 );
+                }
                 else
                   printf( "%3ldS  <uninitialized>\n",
                           i );
@@ -2421,18 +2453,28 @@
             {
               printf( "Stack\n"
                       "\n" );
-              printf( " idx         value       \n"
-                      "-------------------------\n" );
+              printf( " idx         value\n"
+                      "-----------------------------------\n" );
 
               for ( ; args >= 0; args-- )
               {
-                long  val = (signed long)CUR.stack[args];
+                FT_Long  v = (signed long)CUR.stack[args];
 
 
-                printf( "%3lds  %8ld (%8.2f)\n",
-                        CUR.top - args,
-                        val,
-                        val / 64.0 );
+
+                if ( v > -64 && v < 0 )
+                  printf( "%3lds  %8ld (   -0'%2ld, %8.2f)\n",
+                          CUR.top - args,
+                          v,
+                          -v % 64,
+                          v / 64.0 );
+                else
+                  printf( "%3lds  %8ld (%5ld'%2ld, %8.2f)\n",
+                          CUR.top - args,
+                          v,
+                          v / 64,
+                          ( v < 0 ? -v : v ) % 64,
+                          v / 64.0 );
               }
               printf( "\n" );
             }
@@ -2817,14 +2859,16 @@
 
     /* we expect that at least one interpreter version is available */
     if ( num_tt_interpreter_versions == 2 )
-      sprintf(versions, "%d and %d",
-                        tt_interpreter_versions[0],
-                        tt_interpreter_versions[1] );
+      snprintf( versions, sizeof ( versions ),
+                "%d and %d",
+                tt_interpreter_versions[0],
+                tt_interpreter_versions[1] );
     else
-      sprintf(versions, "%d, %d, and %d",
-                        tt_interpreter_versions[0],
-                        tt_interpreter_versions[1],
-                        tt_interpreter_versions[2] );
+      snprintf( versions, sizeof ( versions ),
+                "%d, %d, and %d",
+                tt_interpreter_versions[0],
+                tt_interpreter_versions[1],
+                tt_interpreter_versions[2] );
 
     fprintf( stderr,
       "\n"

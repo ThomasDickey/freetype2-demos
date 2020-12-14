@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+
   FT_Error      error;
 
   FT_Library    library;
@@ -111,9 +112,9 @@ void  forget_my_block( void*  base )
   exit(1);
 }
 
-
-FT_CALLBACK_DEF( void* )  my_alloc( FT_Memory  memory,
-                                    long       size )
+static
+void*  my_alloc( FT_Memory  memory,
+                 long       size )
 {
   void*  p = malloc(size);
   if (p)
@@ -123,20 +124,20 @@ FT_CALLBACK_DEF( void* )  my_alloc( FT_Memory  memory,
   return p;
 }
 
-
-FT_CALLBACK_DEF( void )  my_free( FT_Memory  memory,
-                                  void*      block )
+static
+void  my_free( FT_Memory  memory,
+               void*      block )
 {
   memory=memory;
   forget_my_block(block);
   /* free(block);  WE DO NOT REALLY FREE THE BLOCK */
 }
 
-
-FT_CALLBACK_DEF( void* )  my_realloc( FT_Memory  memory,
-                                      long       cur_size,
-                                      long       new_size,
-                                      void*      block )
+static
+void*  my_realloc( FT_Memory  memory,
+                   long       cur_size,
+                   long       new_size,
+                   void*      block )
 {
   void*  p;
 
@@ -228,7 +229,6 @@ int  main( int argc, char** argv )
     int           i, file_index;
     unsigned int  id;
     char          filename[1024 + 4];
-    char          alt_filename[1024 + 4];
     char*         execname;
     char*         fname;
 
@@ -261,19 +261,13 @@ int  main( int argc, char** argv )
         i--;
       }
 
-      filename[1024] = '\0';
-      alt_filename[1024] = '\0';
-
-      strncpy( filename, fname, 1024 );
-      strncpy( alt_filename, fname, 1024 );
-
 #ifndef macintosh
-      if ( i >= 0 )
-      {
-        strncpy( filename + strlen( filename ), ".ttf", 4 );
-        strncpy( alt_filename + strlen( alt_filename ), ".ttc", 4 );
-      }
+      snprintf( filename, sizeof ( filename ), "%s%s", fname,
+                ( i >= 0 ) ? ".ttf" : "" );
+#else
+      snprintf( filename, sizeof ( filename ), "%s", fname );
 #endif
+
       i     = strlen( filename );
       fname = filename;
 

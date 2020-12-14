@@ -6,7 +6,7 @@
  *  used by the graphics utility of the FreeType test suite.
  *
  *  Written by Antoine Leca.
- *  Copyright (C) 1999-2019 by
+ *  Copyright (C) 1999-2020 by
  *  Antoine Leca, David Turner, Robert Wilhelm, and Werner Lemberg.
  *
  *  Borrowing liberally from the other FreeType drivers.
@@ -29,10 +29,10 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#include <grobjs.h>
-#include <grdevice.h>
+#include "grobjs.h"
+#include "grdevice.h"
 #ifdef SWIZZLE
-#include <grswizzle.h>
+#include "grswizzle.h"
 #endif
 
 /* logging facility */
@@ -58,12 +58,9 @@
 #endif
 /*-------------------*/
 
-/*  Size of the window. */
-#define WIN_WIDTH   640u
-#define WIN_HEIGHT  450u
+/*  Custom messages. */
+#define WM_RESIZE  WM_USER+517
 
-/* These values can be changed, but WIN_WIDTH should remain for now a  */
-/* multiple of 32 to avoid padding issues.                             */
 
   typedef struct  Translator_
   {
@@ -101,28 +98,17 @@
     { VK_F12,       grKeyF12       }
   };
 
-  static
-  Translator  syskey_translators[] =
-  {
-    { VK_F10,       grKeyF10       }
-  };
-
   static ATOM  ourAtom;
 
   typedef struct grWin32SurfaceRec_
   {
     grSurface     root;
     HWND          window;
-    int           window_width;
-    int           window_height;
-    int           title_set;
-    const char*   the_title;
-    LPBITMAPINFO  pbmi;
-    char          bmi[ sizeof(BITMAPINFO) + 256*sizeof(RGBQUAD) ];
-    HBITMAP       hbm;
-    grEvent       ourevent;
-    int           eventToProcess;
-    grBitmap      bgrBitmap;  /* windows wants data in BGR format !! */
+    HICON         sIcon;
+    HICON         bIcon;
+    BITMAPINFOHEADER  bmiHeader;
+    RGBQUAD           bmiColors[256];
+    grBitmap      shadow_bitmap;  /* windows wants 24-bit BGR format !! */
 #ifdef SWIZZLE
     grBitmap      swizzle_bitmap;
 #endif
@@ -139,10 +125,16 @@ gr_win32_surface_done( grWin32Surface*  surface )
     DestroyWindow ( surface->window );
     PostMessage( surface->window, WM_QUIT, 0, 0 );
   }
+
+  DestroyIcon( surface->sIcon );
+  DestroyIcon( surface->bIcon );
+  if ( surface->root.bitmap.mode == gr_pixel_mode_rgb24 )
+  {
 #ifdef SWIZZLE
-  grDoneBitmap( &surface->swizzle_bitmap );
+    grDoneBitmap( &surface->swizzle_bitmap );
 #endif
-  grDoneBitmap( &surface->bgrBitmap );
+    grDoneBitmap( &surface->shadow_bitmap );
+  }
   grDoneBitmap( &surface->root.bitmap );
 }
 
@@ -155,11 +147,10 @@ gr_win32_surface_refresh_rectangle(
          int              w,
          int              h )
 {
-  HDC           hDC;
-  int           row_bytes, delta;
-  LPBITMAPINFO  pbmi   = surface->pbmi;
-  HANDLE        window = surface->window;
-  grBitmap*     bitmap = &surface->root.bitmap;
+  int        delta;
+  RECT       rect;
+  HANDLE     window = surface->window;
+  grBitmap*  bitmap = &surface->root.bitmap;
 
   LOG(( "gr_win32_surface_refresh_rectangle: ( %p, %d, %d, %d, %d )\n",
         (long)surface, x, y, w, h ));
@@ -172,7 +163,7 @@ gr_win32_surface_refresh_rectangle(
     x  = 0;
   }
 
-  delta = x + w - surface->window_width;
+  delta = x + w - bitmap->width;
   if ( delta > 0 )
     w -= delta;
 
@@ -182,22 +173,20 @@ gr_win32_surface_refresh_rectangle(
     y  = 0;
   }
 
-  delta = y + h - surface->window_height;
+  delta = y + h - bitmap->rows;
   if ( delta > 0 )
     h -= delta;
 
   if ( w <= 0 || h <= 0 )
     return;
 
-  /* now, perform the blit */
-  row_bytes = surface->root.bitmap.pitch;
-  if ( row_bytes < 0 )
-    row_bytes = -row_bytes;
-
-  if ( row_bytes * 8 != pbmi->bmiHeader.biWidth * pbmi->bmiHeader.biBitCount )
-    pbmi->bmiHeader.biWidth = row_bytes * 8 / pbmi->bmiHeader.biBitCount;
+  rect.left   = x;
+  rect.top    = y;
+  rect.right  = x + w;
+  rect.bottom = y + h;
 
 #ifdef SWIZZLE
+  if ( bitmap->mode == gr_pixel_mode_rgb24 )
   {
     grBitmap*  swizzle = &surface->swizzle_bitmap;
 
@@ -211,70 +200,44 @@ gr_win32_surface_refresh_rectangle(
   }
 #endif
 
-  /* copy to BGR buffer */
+  /* copy the buffer */
+  if ( bitmap->mode == gr_pixel_mode_rgb24 )
   {
     unsigned char*  read_line   = (unsigned char*)bitmap->buffer;
     int             read_pitch  = bitmap->pitch;
-    unsigned char*  write_line  = (unsigned char*)surface->bgrBitmap.buffer;
-    int             write_pitch = surface->bgrBitmap.pitch;
-    int             height      = bitmap->rows;
-    int             width       = bitmap->width;
+    unsigned char*  write_line  = (unsigned char*)surface->shadow_bitmap.buffer;
+    int             write_pitch = surface->shadow_bitmap.pitch;
+    int             bytes = 0;
 
     if ( read_pitch < 0 )
-      read_line -= ( height - 1 ) * read_pitch;
+      read_line -= ( bitmap->rows - 1 ) * read_pitch;
 
     if ( write_pitch < 0 )
-      write_line -= ( height - 1 ) * write_pitch;
+      write_line -= ( bitmap->rows - 1 ) * write_pitch;
 
-    if ( bitmap->mode == gr_pixel_mode_gray )
+    read_line  += y * read_pitch  + 3 * x;
+    write_line += y * write_pitch + 3 * x;
+
+    for ( ; h > 0; h-- )
     {
-      for ( ; height > 0; height-- )
+      unsigned char*  read       = read_line;
+      unsigned char*  read_limit = read + 3 * w;
+      unsigned char*  write      = write_line;
+
+      /* convert RGB to BGR */
+      for ( ; read < read_limit; read += 3, write += 3 )
       {
-        unsigned char*  read       = read_line;
-        unsigned char*  read_limit = read + width;
-        unsigned char*  write      = write_line;
-
-        for ( ; read < read_limit; read++, write++ )
-          *write = *read;
-
-        read_line  += read_pitch;
-        write_line += write_pitch;
+        write[0] = read[2];
+        write[1] = read[1];
+        write[2] = read[0];
       }
-    }
-    else
-    {
-      for ( ; height > 0; height-- )
-      {
-        unsigned char*  read       = read_line;
-        unsigned char*  read_limit = read + 3 * width;
-        unsigned char*  write      = write_line;
 
-        for ( ; read < read_limit; read += 3, write += 3 )
-        {
-          write[0] = read[2];
-          write[1] = read[1];
-          write[2] = read[0];
-        }
-
-        read_line  += read_pitch;
-        write_line += write_pitch;
-      }
+      read_line  += read_pitch;
+      write_line += write_pitch;
     }
   }
 
-  hDC = GetDC ( window );
-  SetDIBits ( hDC, surface->hbm,
-              0,
-              bitmap->rows,
-              surface->bgrBitmap.buffer,
-              pbmi,
-              DIB_RGB_COLORS );
-
-  ReleaseDC ( window, hDC );
-
-  ShowWindow( window, SW_SHOW );
-  InvalidateRect ( window, NULL, FALSE );
-  UpdateWindow ( window );
+  InvalidateRect( window, &rect, FALSE );
 }
 
 
@@ -282,10 +245,118 @@ static void
 gr_win32_surface_set_title( grWin32Surface*  surface,
                             const char*      title )
 {
-  /* the title will be set on the next listen_event, just */
-  /* record it there..                                    */
-  surface->title_set = 0;
-  surface->the_title = title;
+  SetWindowText( surface->window, title );
+}
+
+
+static int
+gr_win32_surface_set_icon( grWin32Surface*  surface,
+                           grBitmap*        icon )
+{
+  int       s[] = { GetSystemMetrics( SM_CYSMICON ),
+                    GetSystemMetrics( SM_CYICON ) };
+  WPARAM    wParam;
+  HDC       hDC;
+  VOID*     bts;
+  ICONINFO  ici = { TRUE };
+  HICON     hIcon;
+
+  BITMAPV4HEADER  hdr = { sizeof( BITMAPV4HEADER ),
+                          0, 0, 1, 32, BI_BITFIELDS, 0, 0, 0, 0, 0,
+                          0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000,
+                          LCS_sRGB };
+
+
+  if ( !icon )
+    return s[1];
+  else if ( icon->mode != gr_pixel_mode_rgb32 )
+    return 0;
+  else if ( icon->rows == s[0] )
+    wParam = ICON_SMALL;
+  else if ( icon->rows == s[1] )
+    wParam = ICON_BIG;
+  else
+    return 0;
+
+  ici.hbmMask  = CreateBitmap( icon->width, icon->rows, 1, 1, NULL);
+
+  hdr.bV4Width  =  icon->width;
+  hdr.bV4Height = -icon->rows;
+
+  hDC = GetDC( NULL );
+  ici.hbmColor = CreateDIBSection( hDC, (LPBITMAPINFO)&hdr,
+                                   DIB_RGB_COLORS, &bts, NULL, 0 );
+  ReleaseDC( NULL, hDC );
+
+  memcpy( bts, icon->buffer, icon->rows * icon->width * 4 );
+
+  hIcon = CreateIconIndirect( &ici );
+
+  PostMessage( surface->window, WM_SETICON, wParam, (LPARAM)hIcon );
+
+  switch( wParam )
+  {
+  case ICON_SMALL:
+    surface->sIcon = hIcon;
+    return 0;
+  case ICON_BIG:
+    surface->bIcon = hIcon;
+    return s[0];
+  }
+}
+
+
+/*
+ * set graphics mode
+ * and create the window class and the message handling.
+ */
+
+
+static grWin32Surface*
+gr_win32_surface_resize( grWin32Surface*  surface,
+                         int              width,
+                         int              height )
+{
+  grBitmap*       bitmap = &surface->root.bitmap;
+
+  /* resize root bitmap */
+  if ( grNewBitmap( bitmap->mode,
+                    bitmap->grays,
+                    width,
+                    height,
+                    bitmap ) )
+    return 0;
+  bitmap->pitch = -bitmap->pitch;
+
+  /* resize BGR shadow bitmap */
+  if ( bitmap->mode == gr_pixel_mode_rgb24 )
+  {
+    if ( grNewBitmap( bitmap->mode,
+                      bitmap->grays,
+                      width,
+                      height,
+                      &surface->shadow_bitmap ) )
+    return 0;
+    surface->shadow_bitmap.pitch = -surface->shadow_bitmap.pitch;
+
+#ifdef SWIZZLE
+    if ( grNewBitmap( bitmap->mode,
+                      bitmap->grays,
+                      width,
+                      height,
+                      &surface->swizzle_bitmap ) )
+      return 0;
+    surface->swizzle_bitmap.pitch = -surface->swizzle_bitmap.pitch;
+#endif
+  }
+  else
+    surface->shadow_bitmap.buffer = bitmap->buffer;
+
+  /* update the header to appropriate values */
+  surface->bmiHeader.biWidth  = width;
+  surface->bmiHeader.biHeight = height;
+
+  return surface;
 }
 
 static void
@@ -298,29 +369,61 @@ gr_win32_surface_listen_event( grWin32Surface*  surface,
 
   event_mask=event_mask;  /* unused parameter */
 
-  if ( window && !surface->title_set )
+  while (GetMessage( &msg, NULL, 0, 0 ) > 0)
   {
-    SetWindowText( window, surface->the_title );
-    surface->title_set = 1;
-  }
+    switch ( msg.message )
+    {
+    case WM_RESIZE:
+      {
+        int  width  = LOWORD(msg.lParam);
+        int  height = HIWORD(msg.lParam);
 
-  surface->eventToProcess = 0;
-  while (GetMessage( &msg, 0, 0, 0 ))
-  {
+
+        if ( ( width  != surface->root.bitmap.width  ||
+               height != surface->root.bitmap.rows   )         &&
+             gr_win32_surface_resize( surface, width, height ) )
+        {
+          grevent->type  = gr_event_resize;
+          grevent->x     = width;
+          grevent->y     = height;
+          return;
+        }
+      }
+      break;
+
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
+      {
+        Translator*  trans = key_translators;
+        Translator*  limit = trans + sizeof( key_translators ) /
+                                     sizeof( key_translators[0] );
+        for ( ; trans < limit; trans++ )
+          if ( msg.wParam == trans->winkey )
+          {
+            grevent->type = gr_event_key;
+            grevent->key  = trans->grkey;
+            LOG(( "KeyPress: VK = 0x%02x\n", msg.wParam ));
+            return;
+          }
+      }
+      break;
+
+    case WM_CHAR:
+      {
+        grevent->type = gr_event_key;
+        grevent->key  = msg.wParam;
+        LOG(( isprint( msg.wParam ) ? "KeyPress: Char = '%c'\n"
+                                    : "KeyPress: Char = <%02x>\n",
+              msg.wParam ));
+        return;
+      }
+      break;
+    }
+
     TranslateMessage( &msg );
     DispatchMessage( &msg );
-    if (surface->eventToProcess)
-      break;
   }
-
-  *grevent = surface->ourevent;
 }
-
-/*
- * set graphics mode
- * and create the window class and the message handling.
- */
-
 
 static grWin32Surface*
 gr_win32_surface_init( grWin32Surface*  surface,
@@ -328,10 +431,34 @@ gr_win32_surface_init( grWin32Surface*  surface,
 {
   static RGBQUAD  black = {    0,    0,    0, 0 };
   static RGBQUAD  white = { 0xFF, 0xFF, 0xFF, 0 };
-  LPBITMAPINFO    pbmi;
 
-  /* find some memory for the bitmap header */
-  surface->pbmi = pbmi = (LPBITMAPINFO) surface->bmi;
+
+  /* Set default mode */
+  if ( bitmap->mode == gr_pixel_mode_none )
+  {
+    HDC  hDC;
+    int  bpp;
+
+    hDC = GetDC( NULL );
+    bpp = GetDeviceCaps( hDC, BITSPIXEL ) * GetDeviceCaps( hDC, PLANES );
+    ReleaseDC( NULL, hDC );
+
+    switch ( bpp )
+    {
+    case 8:
+      bitmap->mode = gr_pixel_mode_gray;
+      break;
+    case 16:
+      bitmap->mode = gr_pixel_mode_rgb565;
+      break;
+    case 24:
+      bitmap->mode = gr_pixel_mode_rgb24;
+      break;
+    case 32:
+    default:
+      bitmap->mode = gr_pixel_mode_rgb32;
+    }
+  }
 
   LOG(( "Win32: init_surface( %p, %p )\n", surface, bitmap ));
 
@@ -349,30 +476,31 @@ gr_win32_surface_init( grWin32Surface*  surface,
                     bitmap->rows,
                     bitmap ) )
     return 0;
+  bitmap->pitch = -bitmap->pitch;
 
   /* allocate the BGR shadow bitmap */
-  if ( grNewBitmap( bitmap->mode,
-                    bitmap->grays,
-                    bitmap->width,
-                    bitmap->rows,
-                    &surface->bgrBitmap ) )
-    return 0;
-
-  surface->bgrBitmap.pitch = -surface->bgrBitmap.pitch;
-
-#ifdef SWIZZLE
   if ( bitmap->mode == gr_pixel_mode_rgb24 )
   {
     if ( grNewBitmap( bitmap->mode,
                       bitmap->grays,
                       bitmap->width,
                       bitmap->rows,
+                      &surface->shadow_bitmap ) )
+      return 0;
+    surface->shadow_bitmap.pitch = -surface->shadow_bitmap.pitch;
+
+#ifdef SWIZZLE
+    if ( grNewBitmap( bitmap->mode,
+                      bitmap->grays,
+                      bitmap->width,
+                      bitmap->rows,
                       &surface->swizzle_bitmap ) )
       return 0;
-
     surface->swizzle_bitmap.pitch = -surface->swizzle_bitmap.pitch;
-  }
 #endif
+  }
+  else
+    surface->shadow_bitmap.buffer = bitmap->buffer;
 
   LOG(( "       -- output bitmap =\n" ));
   LOG(( "       --   mode   = %d\n", bitmap->mode ));
@@ -380,45 +508,61 @@ gr_win32_surface_init( grWin32Surface*  surface,
   LOG(( "       --   width  = %d\n", bitmap->width ));
   LOG(( "       --   height = %d\n", bitmap->rows ));
 
-  bitmap->pitch        = -bitmap->pitch;
-  surface->root.bitmap = *bitmap;
-
-  /* initialize the header to appropriate values */
-  memset( pbmi, 0, sizeof ( BITMAPINFO ) + sizeof ( RGBQUAD ) * 256 );
-
-  pbmi->bmiHeader.biSize   = sizeof ( BITMAPINFOHEADER );
-  pbmi->bmiHeader.biWidth  = bitmap->width;
-  pbmi->bmiHeader.biHeight = bitmap->rows;
-  pbmi->bmiHeader.biPlanes = 1;
+  surface->bmiHeader.biSize   = sizeof( BITMAPINFOHEADER );
+  surface->bmiHeader.biWidth  = bitmap->width;
+  surface->bmiHeader.biHeight = bitmap->rows;
+  surface->bmiHeader.biPlanes = 1;
 
   switch ( bitmap->mode )
   {
   case gr_pixel_mode_mono:
-    pbmi->bmiHeader.biBitCount = 1;
-    pbmi->bmiColors[0] = white;
-    pbmi->bmiColors[1] = black;
+    surface->bmiHeader.biBitCount = 1;
+    surface->bmiColors[0] = white;
+    surface->bmiColors[1] = black;
     break;
 
   case gr_pixel_mode_rgb24:
-    pbmi->bmiHeader.biBitCount    = 24;
-    pbmi->bmiHeader.biCompression = BI_RGB;
+    surface->bmiHeader.biBitCount    = 24;
+    surface->bmiHeader.biCompression = BI_RGB;
     break;
 
   case gr_pixel_mode_gray:
-    pbmi->bmiHeader.biBitCount = 8;
-    pbmi->bmiHeader.biClrUsed  = bitmap->grays;
+    surface->bmiHeader.biBitCount = 8;
+    surface->bmiHeader.biClrUsed  = bitmap->grays;
     {
       int   count = bitmap->grays;
       int   x;
-      RGBQUAD*  color = pbmi->bmiColors;
+      RGBQUAD*  color = surface->bmiColors;
 
       for ( x = 0; x < count; x++, color++ )
       {
         color->rgbRed   =
         color->rgbGreen =
-        color->rgbBlue  = (unsigned char)(((count-x)*255)/count);
+        color->rgbBlue  = (unsigned char)(x*255/(count-1));
         color->rgbReserved = 0;
       }
+    }
+    break;
+
+  case gr_pixel_mode_rgb32:
+    surface->bmiHeader.biBitCount    = 32;
+    surface->bmiHeader.biCompression = BI_RGB;
+    break;
+
+  case gr_pixel_mode_rgb555:
+    surface->bmiHeader.biBitCount    = 16;
+    surface->bmiHeader.biCompression = BI_RGB;
+    break;
+
+  case gr_pixel_mode_rgb565:
+    surface->bmiHeader.biBitCount    = 16;
+    surface->bmiHeader.biCompression = BI_BITFIELDS;
+    {
+       LPDWORD  mask = (LPDWORD)surface->bmiColors;
+
+       mask[0] = 0xF800;
+       mask[1] = 0x07E0;
+       mask[2] = 0x001F;
     }
     break;
 
@@ -426,11 +570,8 @@ gr_win32_surface_init( grWin32Surface*  surface,
     return 0;         /* Unknown mode */
   }
 
-  surface->window_width  = bitmap->width;
-  surface->window_height = bitmap->rows;
-
   {
-    DWORD  style = WS_OVERLAPPED | WS_CAPTION | WS_MINIMIZEBOX | WS_SYSMENU;
+    DWORD  style = WS_OVERLAPPEDWINDOW;
     RECT   WndRect;
 
     WndRect.left   = 0;
@@ -457,9 +598,13 @@ gr_win32_surface_init( grWin32Surface*  surface,
   if ( surface->window == 0 )
     return  0;
 
+  ShowWindow( surface->window, SW_SHOWNORMAL );
+
+  surface->root.bitmap       = *bitmap;
   surface->root.done         = (grDoneSurfaceFunc) gr_win32_surface_done;
   surface->root.refresh_rect = (grRefreshRectFunc) gr_win32_surface_refresh_rectangle;
   surface->root.set_title    = (grSetTitleFunc)    gr_win32_surface_set_title;
+  surface->root.set_icon     = (grSetIconFunc)     gr_win32_surface_set_icon;
   surface->root.listen_event = (grListenEventFunc) gr_win32_surface_listen_event;
 
   return surface;
@@ -495,109 +640,46 @@ LRESULT CALLBACK Message_Process( HWND handle, UINT mess,
 
     switch( mess )
     {
-    case WM_DESTROY:
-        /* warn the main thread to quit if it didn't know */
-      surface->ourevent.type  = gr_event_key;
-      surface->ourevent.key   = grKeyEsc;
-      surface->eventToProcess = 1;
-      surface->window         = 0;
-      PostQuitMessage ( 0 );
-      DeleteObject ( surface->hbm );
+    case WM_CLOSE:
+      /* warn the main thread to quit if it didn't know */
+      PostMessage( handle, WM_CHAR, (WPARAM)grKeyEsc, 0 );
       return 0;
 
-    case WM_CREATE:
+    case WM_SIZE:
+      if ( wParam == SIZE_RESTORED || wParam == SIZE_MAXIMIZED )
+        PostMessage( handle, WM_RESIZE, wParam, lParam );
+      break;
+
+    case WM_EXITSIZEMOVE:
       {
-        HDC           hDC;
-        LPBITMAPINFO  pbmi = surface->pbmi;
+        RECT  WndRect;
 
-        hDC          = GetDC ( handle );
-        surface->hbm = CreateDIBitmap (
-          /* HDC hdc;     handle of device context        */ hDC,
-          /* BITMAPINFOHEADER FAR* lpbmih;  addr.of header*/ &pbmi->bmiHeader,
-          /* DWORD dwInit;  CBM_INIT to initialize bitmap */ 0,
-          /* const void FAR* lpvBits;   address of values */ NULL,
-          /* BITMAPINFO FAR* lpbmi;   addr.of bitmap data */ pbmi,
-          /* UINT fnColorUse;      RGB or palette indices */ DIB_RGB_COLORS);
-        ReleaseDC ( handle, hDC );
-        break;
-      }
-
-    case WM_PAINT:
-      {
-      HDC           hDC, memDC;
-      HANDLE        oldbm;
-      PAINTSTRUCT   ps;
-
-      hDC   = BeginPaint ( handle, &ps );
-      memDC = CreateCompatibleDC( hDC );
-      oldbm = SelectObject( memDC, surface->hbm );
-
-      BitBlt ( hDC, 0, 0, surface->window_width, surface->window_height,
-               memDC, 0, 0, SRCCOPY);
-
-      ReleaseDC ( handle, hDC );
-      SelectObject ( memDC, oldbm );
-      DeleteObject ( memDC );
-      EndPaint ( handle, &ps );
-      return 0;
-      }
-
-    case WM_SYSKEYDOWN:
-      {
-        int          count = sizeof( syskey_translators )/sizeof( syskey_translators[0] );
-        Translator*  trans = syskey_translators;
-        Translator*  limit = trans + count;
-        for ( ; trans < limit; trans++ )
-          if ( wParam == trans->winkey )
-          {
-            surface->ourevent.key = trans->grkey;
-            goto Do_Key_Event;
-          }
-        return DefWindowProc( handle, mess, wParam, lParam );
-      }
-
-
-    case WM_KEYDOWN:
-      switch ( wParam )
-      {
-      case VK_ESCAPE:
-        surface->ourevent.type  = gr_event_key;
-        surface->ourevent.key   = grKeyEsc;
-        surface->eventToProcess = 1;
-        PostQuitMessage ( 0 );
-        return 0;
-
-      default:
-        /* lookup list of translated keys */
-        {
-          int          count = sizeof( key_translators )/sizeof( key_translators[0] );
-          Translator*  trans = key_translators;
-          Translator*  limit = trans + count;
-          for ( ; trans < limit; trans++ )
-            if ( wParam == trans->winkey )
-            {
-              surface->ourevent.key = trans->grkey;
-              goto Do_Key_Event;
-            }
-        }
-
-        /* the key isn't found, default processing               */
-        /* return DefWindowProc( handle, mess, wParam, lParam ); */
-        return DefWindowProc( handle, mess, wParam, lParam );
-    }
-
-    case WM_CHAR:
-      {
-        surface->ourevent.key = wParam;
-
-    Do_Key_Event:
-        surface->ourevent.type  = gr_event_key;
-        surface->eventToProcess = 1;
+        GetClientRect( handle, &WndRect );
+        PostMessage( handle, WM_RESIZE, SIZE_RESTORED,
+                     MAKELPARAM( WndRect.right, WndRect.bottom ) );
       }
       break;
 
+    case WM_PAINT:
+      {
+        HDC           hDC;
+        PAINTSTRUCT   ps;
+
+        hDC   = BeginPaint ( handle, &ps );
+        SetDIBitsToDevice( hDC, 0, 0,
+                           surface->bmiHeader.biWidth,
+                           surface->bmiHeader.biHeight,
+                           0, 0, 0,
+                           surface->bmiHeader.biHeight,
+                           surface->shadow_bitmap.buffer,
+                           (LPBITMAPINFO)&surface->bmiHeader,
+                           DIB_RGB_COLORS );
+        EndPaint ( handle, &ps );
+        return 0;
+      }
+
     default:
-       return DefWindowProc( handle, mess, wParam, lParam );
+      return DefWindowProc( handle, mess, wParam, lParam );
     }
     return 0;
   }

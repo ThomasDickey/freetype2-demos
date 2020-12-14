@@ -2,7 +2,7 @@
 /*                                                                          */
 /*  The FreeType project -- a free and portable quality TrueType renderer.  */
 /*                                                                          */
-/*  Copyright (C) 1996-2019 by                                              */
+/*  Copyright (C) 1996-2020 by                                              */
 /*  D. Turner, R.Wilhelm, and W. Lemberg                                    */
 /*                                                                          */
 /*  grblit.c: Support for alpha blending with gamma correction and caching. */
@@ -44,25 +44,30 @@
 
 /* */
 
-#define  GRGB_TO_BGR565(r,g,b)    GRGB_TO_RGB565(b,g,r)
+#define  GRGB_TO_RGB555(r,g,b)   ((unsigned short)( (((r) << 7) & 0x7C00) |  \
+                                                    (((g) << 2) & 0x03E0) |  \
+                                                    (((b) >> 3) & 0x001F) ) )
 
-#define  GBGR565_TO_RGB24(p)   ( ( ((p) << 19) & 0xF80000 ) |             \
-                                 ( ((p) << 12) & 0x070000 ) |             \
-                                 ( ((p) <<  5) & 0x00FC00 ) |             \
-                                 ( ((p) >>  1) & 0x000300 ) |             \
-                                 ( ((p) >>  8) & 0x0000F8 ) |             \
-                                 ( ((p) >> 13) & 0x000007 ) )
 
-#define  GRGB24_TO_BGR565(p)   ( (unsigned short)( (((p) <<  8) & 0xF800 ) |  \
-                                                   (((p) >>  5) & 0x07E0 ) |  \
-                                                   (((p) >> 19) & 0x001F ) ) )
+#define  GRGB555_TO_RGB24(p)   ( ( ((p) << 9) & 0xF80000 ) |             \
+                                 ( ((p) << 4) & 0x070000 ) |             \
+                                 ( ((p) << 6) & 0x00F800 ) |             \
+                                 ( ((p) << 1) & 0x000700 ) |             \
+                                 ( ((p) << 3) & 0x0000F8 ) |             \
+                                 ( ((p) >> 2) & 0x000007 ) )
+
+#define  GRGB24_TO_RGB555(p)   ( (unsigned short)( (((p) >> 9) & 0x7C00 ) |  \
+                                                   (((p) >> 6) & 0x03E0 ) |  \
+                                                   (((p) >> 3) & 0x001F ) ) )
 
 /* */
 
-#define  GRGB_TO_GRAY8(r,g,b)  ( (unsigned char)( ( 2*(r) + 7*(g) + (b) ) / 10 ) )
+#define  GRGB_TO_GRAY8(r,g,b)  ( (unsigned char)( ( 3*(r) + 6*(g) + (b) ) / 10 ) )
 
-#define  GRGB24_TO_GRAY8(p)   ( (unsigned char)( ( 2*( ((p) >> 16) & 0xFF ) +         \
-                                                   7*( ((p) >>  8) & 0xFF ) +         \
+#define  GGRAY8_TO_RGB24(p)    GRGB_PACK(p,p,p)
+
+#define  GRGB24_TO_GRAY8(p)   ( (unsigned char)( ( 3*( ((p) >> 16) & 0xFF ) +         \
+                                                   6*( ((p) >>  8) & 0xFF ) +         \
                                                      ( ((p))       & 0xFF ) ) / 10 ) )
 
 /* */
@@ -145,32 +150,32 @@
 
 #include "gblany.h"
 
-/* Bgr565 blitting routines
+/* Rgb555 blitting routines
  */
-#define  GDST_TYPE               bgr565
+#define  GDST_TYPE               rgb555
 #define  GDST_INCR               2
 
 #define  GDST_READ(d,p)          p = (GBlenderPixel)*(unsigned short*)(d);  \
-                                 p = GBGR565_TO_RGB24(p)
+                                 p = GRGB555_TO_RGB24(p)
 
-#define  GDST_COPY_VAR           unsigned short  pix = GRGB_TO_BGR565(r,g,b);
-#define  GDST_COPY(d)            *(d) = (unsigned char)pix
+#define  GDST_COPY_VAR           unsigned short  pix = GRGB_TO_RGB555(r,g,b);
+#define  GDST_COPY(d)            *(unsigned short*)(d) = pix
 
 #define  GDST_STOREB(d,cells,a)                                   \
     {                                                             \
       GBlenderCell*  _g = (cells) + (a)*3;                        \
                                                                   \
-      *(unsigned short*)(d) = GRGB_TO_BGR565(_g[0],_g[1],_g[2]);  \
+      *(unsigned short*)(d) = GRGB_TO_RGB555(_g[0],_g[1],_g[2]);  \
     }
 
 #define  GDST_STOREP(d,cells,a)                         \
     {                                                   \
       GBlenderPixel  _pix = (cells)[(a)];               \
                                                         \
-      *(unsigned short*)(d) = GRGB24_TO_BGR565(_pix);   \
+      *(unsigned short*)(d) = GRGB24_TO_RGB555(_pix);   \
     }
 
-#define  GDST_STOREC(d,r,g,b)   *(unsigned short*)(d) = GRGB_TO_BGR565(r,g,b)
+#define  GDST_STOREC(d,r,g,b)   *(unsigned short*)(d) = GRGB_TO_RGB555(r,g,b)
 
 #include "gblany.h"
 
@@ -210,7 +215,7 @@ blit_funcs[GBLENDER_TARGET_MAX] =
   blit_funcs_rgb32,
   blit_funcs_rgb24,
   blit_funcs_rgb565,
-  blit_funcs_bgr565
+  blit_funcs_rgb555
 };
 
 
@@ -269,6 +274,7 @@ gblender_blit_init( GBlenderBlit           blit,
   case gr_pixel_mode_rgb32:  dst_format = GBLENDER_TARGET_RGB32; break;
   case gr_pixel_mode_rgb24:  dst_format = GBLENDER_TARGET_RGB24; break;
   case gr_pixel_mode_rgb565: dst_format = GBLENDER_TARGET_RGB565; break;
+  case gr_pixel_mode_rgb555: dst_format = GBLENDER_TARGET_RGB555; break;
   default:
     return -2;
   }
@@ -345,6 +351,69 @@ gblender_blit_init( GBlenderBlit           blit,
 }
 
 
+GBLENDER_APIDEF( void )
+grSetTargetGamma( grBitmap*  target,
+                  double     gamma )
+{
+  grSurface*  surface = (grSurface*)target;
+
+
+  gblender_init( surface->gblender, gamma );
+}
+
+
+GBLENDER_APIDEF( void )
+grSetTargetPenBrush( grBitmap*  target,
+                     int        x,
+                     int        y,
+                     grColor    color )
+{
+  grSurface*  surface = (grSurface*)target;
+
+
+  surface->origin = target->buffer;
+  if ( target->pitch < 0 )
+    surface->origin += ( y - target->rows ) * target->pitch;
+  else
+    surface->origin += ( y - 1 ) * target->pitch;
+
+  switch ( target->mode )
+  {
+  case gr_pixel_mode_gray:
+    surface->origin    += x;
+    surface->gray_spans = _gblender_spans_gray8;
+    surface->gcolor     = GGRAY8_TO_RGB24( color.value );
+    break;
+  case gr_pixel_mode_rgb555:
+    surface->origin    += x * 2;
+    surface->gray_spans = _gblender_spans_rgb555;
+    surface->gcolor     = GRGB555_TO_RGB24( color.value );
+    break;
+  case gr_pixel_mode_rgb565:
+    surface->origin    += x * 2;
+    surface->gray_spans = _gblender_spans_rgb565;
+    surface->gcolor     = GRGB565_TO_RGB24( color.value );
+    break;
+  case gr_pixel_mode_rgb24:
+    surface->origin    += x * 3;
+    surface->gray_spans = _gblender_spans_rgb24;
+    surface->gcolor     = GRGB_PACK( color.chroma[0],
+                                     color.chroma[1],
+                                     color.chroma[2] );
+    break;
+  case gr_pixel_mode_rgb32:
+    surface->origin    += x * 4;
+    surface->gray_spans = _gblender_spans_rgb32;
+    surface->gcolor     = color.value;
+    break;
+  default:
+    surface->origin     = NULL;
+    surface->gray_spans = (grSpanFunc)NULL;
+    surface->gcolor     = 0;
+  }
+}
+
+
 GBLENDER_APIDEF( int )
 grBlitGlyphToSurface( grSurface*  surface,
                       grBitmap*   glyph,
@@ -353,7 +422,6 @@ grBlitGlyphToSurface( grSurface*  surface,
                       grColor     color )
 {
   GBlenderBlitRec       gblit[1];
-  GBlenderPixel         gcolor;
 
 
   /* check arguments */
@@ -377,41 +445,9 @@ grBlitGlyphToSurface( grSurface*  surface,
     return -1;
   }
 
-  gcolor = ((GBlenderPixel)color.chroma[0] << 16) |
-           ((GBlenderPixel)color.chroma[1] << 8 ) |
-           ((GBlenderPixel)color.chroma[2]      ) ;
+  /* this is not a direct mode but we need to decode color */
+  grSetTargetPenBrush( (grBitmap*)surface, 0, 0, color );
 
-  gblender_blit_run( gblit, gcolor );
+  gblender_blit_run( gblit, surface->gcolor );
   return 1;
-}
-
-
-GBLENDER_APIDEF( void )
-grSetTargetGamma( grBitmap*  target,
-                  double     gamma )
-{
-  grSurface*  surface = (grSurface*)target;
-
-
-  gblender_init( surface->gblender, gamma );
-
-  /* not related to gamma but needs to be set */
-  switch ( target->mode )
-  {
-  case gr_pixel_mode_gray:
-    surface->gray_spans = _gblender_spans_gray8;
-    break;
-  case gr_pixel_mode_rgb32:
-    surface->gray_spans = _gblender_spans_rgb32;
-    break;
-  case gr_pixel_mode_rgb24:
-    surface->gray_spans = _gblender_spans_rgb24;
-    break;
-  case gr_pixel_mode_rgb565:
-    surface->gray_spans = _gblender_spans_rgb565;
-    break;
-  default:
-    (void)_gblender_spans_bgr565;  /* unused */
-    surface->gray_spans = (grSpanFunc)0;
-  }
 }
